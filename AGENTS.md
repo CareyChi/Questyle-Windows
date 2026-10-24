@@ -4,7 +4,8 @@
 
 ## 项目范围
 
-- 当前目标是 Windows USB Dongle 控制客户端。开发入口见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)，逆向证据见 [docs/REVERSE_ENGINEERING.md](docs/REVERSE_ENGINEERING.md)。
+- 当前目标是 Windows USB Dongle 控制客户端。开发入口见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)，本机逆向证据及文档位于 reverse/analysis、reverse/docs，不随仓库上传。
+- 所有原始 APK、逆向分析材料和工具统一存放在 reverse 中，整个目录被 Git 忽略，不得强制添加到暂存区。便携 SDK 现位于 reverse/tools/dotnet；从仓库克隆时可使用系统 .NET 8 SDK。
 - Wi-Fi 播放器和本地音乐模块已移除，不得自行恢复，也不得顺手引入网络服务、播放器或新的产品模块。
 - macOS、Linux、网页端及本地桥接程序仅讨论过可行性。没有开发授权时，不得自行启动迁移、搭建服务或部署。
 - 当前不打包新版本。普通修改仅编辑源码并按需编译验证，不运行 publish，不更新 dist、压缩包、版本号或发布校验文件。用户后续明确要求发布时再执行。
@@ -28,7 +29,7 @@
 - 不自动安装或替换驱动，不遍历未知写指令，不顺便执行恢复出厂、清除配对、固件写入。
 - USB 操作会中断音频。构建和普通验证不得自动接管设备；实机操作必须属于用户已授权范围，不重复索要已有授权。
 - 保持短会话、先挂 IN 再发 OUT、最终释放设备，以及异步传输完成后再释放内存的要求。
-- 不修改原始 base.apk，不覆盖逆向原始证据，不把包含真实设备地址的原始日志放进发布物或公共文档。
+- 不修改原始 reverse/base.apk，不覆盖逆向原始证据，不把包含真实设备地址的原始日志放进发布物或公共文档。
 
 ## 禁止反复测试
 
@@ -52,7 +53,7 @@
 
 ## 文档与沟通
 
-- docs/DEVELOPMENT.md 维护功能和实现；docs/PROTOCOL.md 维护协议速查；docs/REVERSE_ENGINEERING.md 维护方案与证据；docs/VERIFICATION.md 维护验证结果。不要把同一段说明复制到多个文件。
+- docs/DEVELOPMENT.md 维护功能和实现；docs/VERIFICATION.md 维护验证结果；本机 reverse/docs/PROTOCOL.md 维护协议速查，reverse/docs/REVERSE_ENGINEERING.md 维护方案与证据。不要把同一段说明复制到多个文件。
 - 功能变化时更新受影响的文档及入口，不机械刷新全部文档、日期、测试数字或版本号。
 - 默认中文，说明简洁、具体。进度只报告新发现、阻碍或决定，不反复复述用户需求、计划或已完成事项。
 - 最终交付简要说明结果、实际验证及必要限制；不要在多个段落重复同一结论，不附无请求的长篇使用教程或后续推销。

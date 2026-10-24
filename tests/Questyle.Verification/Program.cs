@@ -4,7 +4,7 @@ using System.Text.Json;
 
 if (args.Contains("--snapshot") || args.Contains("--same-settings"))
 {
-    UsbDkTransport.HelperPath = Path.GetFullPath("tools/usbdk-runtime/UsbDk Runtime Library/UsbDk Runtime Library/UsbDkHelper.dll");
+    UsbDkTransport.HelperPath = Path.GetFullPath("reverse/tools/usbdk-runtime/UsbDk Runtime Library/UsbDk Runtime Library/UsbDkHelper.dll");
     var controller = new DongleController(); controller.Log += Console.WriteLine;
     var current = await controller.ReadAsync();
     Console.WriteLine(JsonSerializer.Serialize(current, new JsonSerializerOptions { WriteIndented = true }));
@@ -19,7 +19,7 @@ if (args.Contains("--snapshot") || args.Contains("--same-settings"))
 
 if (args.Contains("--raw-list") || args.Contains("--raw-query"))
 {
-    UsbDkTransport.HelperPath = Path.GetFullPath("tools/usbdk-runtime/UsbDk Runtime Library/UsbDk Runtime Library/UsbDkHelper.dll");
+    UsbDkTransport.HelperPath = Path.GetFullPath("reverse/tools/usbdk-runtime/UsbDk Runtime Library/UsbDk Runtime Library/UsbDkHelper.dll");
     foreach (var device in UsbDkTransport.Enumerate())
     {
         Console.WriteLine(device);

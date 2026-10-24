@@ -1,8 +1,5 @@
-base.apk
-tools/
-analysis/
+/reverse/
 /dist/
-/aotopsy.exe
 **/bin/
 **/obj/
 *.user

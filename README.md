@@ -1,12 +1,12 @@
 # Questyle Windows 移植版
 
-从项目中的 `base.apk`（Questyle Android 1.8.0 / build 78）逆向重建的 Windows 原生客户端。目前是 **0.1.0 功能预览版**，不是全功能移植完成版。
+从本机 `reverse/base.apk`（Questyle Android 1.8.0 / build 78）逆向重建的 Windows 原生客户端。目前是 **0.1.0 功能预览版**，不是全功能移植完成版。
 
-当前源码聚焦 USB Dongle 控制。本次已完成源码裁剪和验证，尚未重新打包；`dist` 和根目录启动脚本仍对应此前发布的程序。
+当前源码聚焦 USB Dongle 控制。本次已完成源码裁剪和验证，尚未重新打包；`dist` 仍是此前发布的程序，根目录启动脚本已移除。
 
 ## 运行
 
-双击项目根目录的 **启动 Questyle.cmd**，或运行 **dist/Questyle-Windows-x64/Questyle.exe**。发布版包含 .NET 运行时，不需要安装 Android 模拟器、Flutter 或 .NET SDK。压缩包使用时请完整解压后运行，保留 DLL 和 Assets 文件夹。
+已有发布物可运行 **dist/Questyle-Windows-x64/Questyle.exe**。发布版包含 .NET 运行时，不需要安装 Android 模拟器、Flutter 或 .NET SDK。压缩包使用时请完整解压后运行，保留 DLL 和 Assets 文件夹。
 
 系统要求：Windows 10 2004（19041）或更新版本，x64。USB 控制需要系统已有的 **UsbDk** 驱动。本次在这台电脑上检测到并使用了现有的 UsbDk，没有安装、替换或卸载设备驱动。
 
@@ -38,28 +38,28 @@ USB 控制会临时独占整个 Dongle，因此会暂停 Windows USB 音频。�
 
 ## 构建和验证
 
-仅编译和验证源码，不生成发布包：
+仅编译和验证源码，不生成发布包。以下使用本机便携 SDK；从仓库克隆后若没有 reverse 目录，安装 .NET 8 SDK 并将命令前缀替换为 `dotnet`：
 
 ```powershell
-./tools/dotnet/dotnet.exe build Questyle.sln -c Release
-./tools/dotnet/dotnet.exe run --project tests/Questyle.Verification -c Release --no-build
-$env:QUESTYLE_DATA_DIR = Join-Path (Get-Location) 'analysis/ui-verification'
-./tools/dotnet/dotnet.exe run --project tests/Questyle.UiVerification -c Release --no-build
+./reverse/tools/dotnet/dotnet.exe build Questyle.sln -c Release
+./reverse/tools/dotnet/dotnet.exe run --project tests/Questyle.Verification -c Release --no-build
+$env:QUESTYLE_DATA_DIR = Join-Path (Get-Location) 'reverse/analysis/ui-verification'
+./reverse/tools/dotnet/dotnet.exe run --project tests/Questyle.UiVerification -c Release --no-build
 Remove-Item Env:QUESTYLE_DATA_DIR
 ```
 
-当前 USB 协议 16 项、USB 界面组件 2 项验证通过。界面组件验证不显示窗口，也不操作硬件。需要打包时再运行 `./build.ps1`；脚本优先使用项目 `tools/dotnet` 中的便携 SDK，否则使用 PATH 上的 .NET 8 SDK，完成验证后生成自带运行时的 x64 目录及 ZIP。
+当前 USB 协议 16 项、USB 界面组件 2 项验证通过。界面组件验证不显示窗口，也不操作硬件。需要打包时再运行 `./build.ps1`；脚本优先使用项目 `reverse/tools/dotnet` 中的便携 SDK，否则使用 PATH 上的 .NET 8 SDK，完成验证后生成自带运行时的 x64 目录及 ZIP。
 
 可选实机只读验证：
 
 ```powershell
-./tools/dotnet/dotnet.exe run --project tests/Questyle.Verification -- --snapshot
+./reverse/tools/dotnet/dotnet.exe run --project tests/Questyle.Verification -- --snapshot
 ```
 
 `--same-settings` 会短暂接管设备，并把当前游戏模式以及当前编解码对应的模式写回原值，再检查回读；它不是自动化构建的一部分。
 
-项目结构：`src/Questyle.Desktop` 是 WPF 客户端；`tests` 包含验证程序；`docs` 保存逆向与验证文档；`analysis` 保存 APK 提取、反汇编与本机诊断，包含设备地址，不进入发布包；`tools` 是本机分析工具和 SDK。
+项目结构：`src/Questyle.Desktop` 是 WPF 客户端；`tests` 包含验证程序；`docs` 保存开发与验证文档；`reverse` 集中保存本机 APK、分析产物、工具及逆向文档，整个目录不纳入 Git。
 
-开发文档：[功能与实现](docs/DEVELOPMENT.md)、[协作约束](AGENTS.md)。逆向文档：[成功方案与复现步骤](docs/REVERSE_ENGINEERING.md)、[协议速查](docs/PROTOCOL.md)、[验证记录](docs/VERIFICATION.md)。
+项目文档：[功能与实现](docs/DEVELOPMENT.md)、[协作约束](AGENTS.md)、[验证记录](docs/VERIFICATION.md)。本机逆向方案与协议速查位于 `reverse/docs`，不随仓库上传。
 
 原 APK 的 SHA-256：`82D4B6DE172A5497E1566E0CBB7E25D7F9120D296FB9D6EB84F3A52315813390`。原文件未修改。

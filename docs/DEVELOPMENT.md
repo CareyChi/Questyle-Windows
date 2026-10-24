@@ -4,9 +4,9 @@
 
 ## 1. 当前范围
 
-本项目从 Questyle Android `1.8.0 / build 78` APK 逆向重建 Windows USB Dongle 客户端，当前版本号为 `0.1.0`。现有界面包含「USB 设备」和「关于与移植状态」两个页面。
+本项目从 Questyle Android `1.8.0 / build 78` APK 逆向重建 Windows USB Dongle 客户端，当前版本号为 `0.1.0`。原始 APK 在本机 reverse/base.apk。现有界面包含「USB 设备」和「关于与移植状态」两个页面。
 
-Wi-Fi 播放器、本地音乐及底部播放栏已从源码移除，对应服务、依赖和测试也已清理，不属于当前功能。`dist` 与根目录启动脚本仍指向此前构建；功能裁剪后尚未发布新包。
+Wi-Fi 播放器、本地音乐及底部播放栏已从源码移除，对应服务、依赖和测试也已清理，不属于当前功能。根目录启动脚本已删除；`dist` 仍是此前构建，功能裁剪后尚未发布新包。
 
 ### 运行条件
 
@@ -23,7 +23,7 @@ Wi-Fi 播放器、本地音乐及底部播放栏已从源码移除，对应服�
 
 ## 2. 功能清单
 
-下文“已接入”表示已有调用实现，不表示在所有设备及状态下均完成实机验证。详细证据和历史验证结果分别见 [逆向方案](REVERSE_ENGINEERING.md) 与 [验证记录](VERIFICATION.md)。
+下文“已接入”表示已有调用实现，不表示在所有设备及状态下均完成实机验证。详细证据保存在本机 `reverse/docs/REVERSE_ENGINEERING.md`，历史验证结果见 [验证记录](VERIFICATION.md)。
 
 ### 2.1 USB 设备与状态
 
@@ -103,7 +103,7 @@ Wi-Fi 播放器、本地音乐及底部播放栏已从源码移除，对应服�
 | [Questyle.Verification](../tests/Questyle.Verification/Program.cs) | 协议自动化检查和可选实机诊断入口 |
 | [Questyle.UiVerification](../tests/Questyle.UiVerification/Program.cs) | 两项 USB 设置 UI 组件回归，无窗口显示 |
 | [build.ps1](../build.ps1) | 验证后生成自带运行时的发布目录和 ZIP |
-| analysis / tools | 本机逆向材料和工具，大部分被 Git 忽略 |
+| reverse | 本机 APK、逆向材料、工具及逆向文档，整个目录被 Git 忽略 |
 | dist | 既有发布物，当前与源码存在功能差异 |
 
 当前通过 IQuestyleTransport 分隔帧交换与业务指令，但 DongleController 的会话创建仍直接使用 UsbDkTransport；不能因此宣称平台层已完全解耦。
@@ -125,33 +125,33 @@ Wi-Fi 播放器、本地音乐及底部播放栏已从源码移除，对应服�
 
 ### 传输约束
 
-本机成功接口为 MI_01，OUT 01、IN 82，包长上限 64；实际端点由配置描述符选择。帧格式、codec 映射和拒绝响应见 [PROTOCOL.md](PROTOCOL.md)，此处不重复命令表。
+本机成功接口为 MI_01，OUT 01、IN 82，包长上限 64；实际端点由配置描述符选择。帧格式、codec 映射和拒绝响应记录在本机 `reverse/docs/PROTOCOL.md`，此处不重复命令表。
 
 UsbDk 会接管整个复合设备，期间 Windows 音频暂时中断。不得扩大成常驻接管或后台轮询。取消/超时必须完成传输清理后释放固定内存与句柄，结束时 StopRedirect。
 
 ## 5. 开发与最小验证
 
-命令在项目根目录执行。优先使用本机 tools/dotnet 中的便携 SDK；没有该目录时使用已安装的 .NET 8 SDK，将命令前缀替换为 dotnet。
+命令在项目根目录执行。优先使用本机 reverse/tools/dotnet 中的便携 SDK；没有该目录时使用已安装的 .NET 8 SDK，将命令前缀替换为 dotnet。
 
 仅编译，不发布：
 
 ```powershell
-./tools/dotnet/dotnet.exe build Questyle.sln -c Release
+./reverse/tools/dotnet/dotnet.exe build Questyle.sln -c Release
 ```
 
 影响协议、解析或命令时运行：
 
 ```powershell
-./tools/dotnet/dotnet.exe run --project tests/Questyle.Verification -c Release --no-build
+./reverse/tools/dotnet/dotnet.exe run --project tests/Questyle.Verification -c Release --no-build
 ```
 
 影响 USB 设置界面行为时运行，数据与日常使用隔离：
 
 ```powershell
 $previousDataDirectory = $env:QUESTYLE_DATA_DIR
-$env:QUESTYLE_DATA_DIR = Join-Path (Get-Location) 'analysis/ui-verification'
+$env:QUESTYLE_DATA_DIR = Join-Path (Get-Location) 'reverse/analysis/ui-verification'
 try {
-    ./tools/dotnet/dotnet.exe run --project tests/Questyle.UiVerification -c Release --no-build
+    ./reverse/tools/dotnet/dotnet.exe run --project tests/Questyle.UiVerification -c Release --no-build
 } finally {
     if ($null -eq $previousDataDirectory) {
         Remove-Item Env:QUESTYLE_DATA_DIR -ErrorAction SilentlyContinue
@@ -177,13 +177,13 @@ try {
 | --same-settings | 读取后写回当前游戏模式；仅当前 codec 匹配时写回对应模式，再比较回读 | 真实写操作，中断音频 |
 | --raw-query | 调查用逐条查询，包含本机已知超时的型号/序列号命令 | 独占且可能长时间等待，不作为常规验证 |
 
-这些入口使用测试程序指定的 `tools/usbdk-runtime/.../UsbDkHelper.dll` 路径，并要求系统已有 UsbDk 驱动。不能把它们加入默认构建检查。
+这些入口使用测试程序指定的 `reverse/tools/usbdk-runtime/.../UsbDkHelper.dll` 路径，并要求系统已有 UsbDk 驱动。不能把它们加入默认构建检查。
 
 ## 6. 构建、运行与发布的区别
 
 - `dotnet build`：生成本地编译产物，不替换 dist。
 - 开发运行：使用已编译程序或 `dotnet run --project src/Questyle.Desktop -c Release --no-build`。窗口会显示，不能把开发运行混入无窗口组件检查。
-- 根目录「启动 Questyle.cmd」：打开 dist 中的现有程序，不运行刚改好的源码。
+- 原根目录启动脚本已删除；运行 dist 内的 Questyle.exe 仍是旧发布物，不是刚改好的源码。
 - `build.ps1`：运行检查、执行 win-x64 self-contained publish、复制声明和许可证、生成 ZIP，是发布流程。
 
 当前保持不打包状态。收到明确发布要求后再使用发布流程；发布时应检查输出目录内是否残留旧模块依赖，避免增量发布带入已删除的文件。第三方资源说明见 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)。
@@ -205,8 +205,8 @@ try {
 ## 8. 文档维护分工
 
 - 本文：当前功能、实现职责、开发与发布入口。
-- [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md)：逆向过程、成功方案、证据位置和复现依据。
-- [PROTOCOL.md](PROTOCOL.md)：帧格式、业务指令、字段和已知设备差异。
+- 本机 `reverse/docs/REVERSE_ENGINEERING.md`：逆向过程、成功方案、证据位置和复现依据，不纳入 Git。
+- 本机 `reverse/docs/PROTOCOL.md`：帧格式、业务指令、字段和已知设备差异，不纳入 Git。
 - [VERIFICATION.md](VERIFICATION.md)：实际完成的验证、设备和边界，不用计划替代结果。
 - [README.md](../README.md)：用户入口与简明使用信息。
 

@@ -123,7 +123,7 @@ public partial class MainWindow : Window
 
     private FrameworkElement BuildAbout() => Scroll(Card("Questyle for Windows", Note("从 Android 1.8.0 APK 逆向重建的 Windows 原生客户端"),
         AboutText("USB Dongle", "已接入双阶段握手、设备与固件信息、耳机搜索和连接、编解码切换、LDAC、aptX Adaptive、游戏模式、Auracast 和改名。QCC Dongle Pro2 已完成实机查询验证；设置是否生效以设备响应及回读为准。"),
-        AboutText("仍在移植的功能", "官方云端曲库、账号与反馈、完整 EQ 音效和固件 OTA 尚未完成。本版本不执行固件写入。恢复的反汇编与协议证据保存在项目 analysis 目录。"),
+        AboutText("仍在移植的功能", "官方云端曲库、账号与反馈、完整 EQ 音效和固件 OTA 尚未完成。本版本不执行固件写入。"),
         AboutText("运行与数据", "Windows 10 2004 或更新版本，64 位。USB 控制依赖系统已有的 UsbDk 驱动，操作期间音频暂时断开，完成后自动释放。日志位于 LocalAppData\\QuestyleWindows。"),
         Row(Button("打开数据文件夹", () => Process.Start(new ProcessStartInfo(AppPaths.DataDirectory) { UseShellExecute = true })), Button("Questyle 官网", () => Process.Start(new ProcessStartInfo("https://www.questyle.com/") { UseShellExecute = true })))), Card("运行日志", Button("导出诊断日志", ExportLog), logBox));
     private UIElement AboutText(string heading, string body) { var h = Text(heading, 16, true); h.Margin = new Thickness(0, 24, 0, 10); return Column(h, Note(body)); }

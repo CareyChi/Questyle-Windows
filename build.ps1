@@ -4,13 +4,13 @@ $env:DOTNET_CLI_TELEMETRY_OPTOUT='1'
 $projectDirectory=$PSScriptRoot
 Push-Location $projectDirectory
 try {
-    $localSdk=Join-Path $projectDirectory 'tools/dotnet/dotnet.exe'
+    $localSdk=Join-Path $projectDirectory 'reverse/tools/dotnet/dotnet.exe'
     $sdk=if(Test-Path -LiteralPath $localSdk){$localSdk}else{(Get-Command dotnet -ErrorAction Stop).Source}
     if(!$SkipTests) {
         & $sdk run --project tests/Questyle.Verification -c Release
         if($LASTEXITCODE){throw 'USB protocol verification failed.'}
         $previousDataDirectory=$env:QUESTYLE_DATA_DIR
-        $env:QUESTYLE_DATA_DIR=Join-Path $projectDirectory 'analysis/ui-verification'
+        $env:QUESTYLE_DATA_DIR=Join-Path $projectDirectory 'reverse/analysis/ui-verification'
         try {
             & $sdk run --project tests/Questyle.UiVerification -c Release
             if($LASTEXITCODE){throw 'USB UI verification failed.'}

@@ -1,0 +1,9 @@
+base.apk
+tools/
+analysis/
+/dist/
+/aotopsy.exe
+**/bin/
+**/obj/
+*.user
+*.suo

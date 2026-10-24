@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Questyle.Desktop/Services/HidTransport.cs" Link="HidTransport.cs" />
+    <Compile Include="../../src/Questyle.Desktop/Services/QuestyleProtocol.cs" Link="QuestyleProtocol.cs" />
+    <Compile Include="../../src/Questyle.Desktop/Services/UsbDkTransport.cs" Link="UsbDkTransport.cs" />
+    <Compile Include="../../src/Questyle.Desktop/Services/DongleController.cs" Link="DongleController.cs" />
+  </ItemGroup>
+</Project>

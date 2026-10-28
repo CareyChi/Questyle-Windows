@@ -243,6 +243,8 @@ static class Program
             var allBandsToggle = Field<CheckBox>(window, "peqBandsEnabled");
             var bandsToggleSize = allBandsToggle.LayoutTransform.TransformBounds(new Rect(allBandsToggle.RenderSize));
             Check(bandsToggleSize.Width is >= 31 and <= 33 && bandsToggleSize.Height is >= 18 and <= 20, "the filter heading switch fits beside its label at approximately 32 by 19 DIP");
+            // The offscreen render arranges a fixed size; settle back to the window's own layout before sampling.
+            SettleTransitions(); Invoke(window, "DrawPeq");
             var originalCurve = Field<PeqCurveVisual>(window, "peqResponseLine").Points.ToArray();
             var bandChoices = Descendants<CheckBox>(Field<ScrollViewer>(window, "peqTable")).ToArray();
             var originalChoices = bandChoices.Select(box => box.IsChecked).ToArray();
@@ -252,7 +254,10 @@ static class Program
             var bypassCurve = Field<PeqCurveVisual>(window, "peqResponseLine");
             var bypassDrawing = (DrawingVisual)VisualTreeHelper.GetChild(bypassCurve, 0);
             var bypassStroke = ((GeometryDrawing)bypassDrawing.Drawing.Children.Single()).Pen.Brush;
-            Check(bypassCurve.Points.SequenceEqual(originalCurve) && ((SolidColorBrush)bypassStroke).Color == ((SolidColorBrush)Field<Brush>(window, "muted")).Color, "bypassing filters retains the exact curve geometry and renders it grey");
+            var bypassPoints = bypassCurve.Points.ToArray();
+            double curveDifference = bypassPoints.Length == originalCurve.Length ? bypassPoints.Zip(originalCurve).Max(pair => Math.Max(Math.Abs(pair.First.X - pair.Second.X), Math.Abs(pair.First.Y - pair.Second.Y))) : double.PositiveInfinity;
+            Check(curveDifference == 0, $"bypassing filters retains the exact curve geometry ({originalCurve.Length}/{bypassPoints.Length} points, largest difference {curveDifference})");
+            Check(((SolidColorBrush)bypassStroke).Color == ((SolidColorBrush)Field<Brush>(window, "muted")).Color, $"bypassed filters render the curve grey (stroke {((SolidColorBrush)bypassStroke).Color})");
             Render(window, "peq-bands-paused", 1240, 800);
             var bypassedUi = (PeqSettings)Invoke(window, "GetPeq")!;
             Check(bandChoices.All(box => !box.IsEnabled) && bandChoices.Select(box => box.IsChecked).SequenceEqual(originalChoices) && !bypassedUi.BandsEnabled && bypassedUi.Preamp == peqDefinition.Preamp, "filter master switch disables all row toggles without changing their choices or preamp");

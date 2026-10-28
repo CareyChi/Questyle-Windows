@@ -192,6 +192,10 @@
                     <Trigger Property="IsChecked" Value="True"><Setter TargetName="CheckSurface" Property="Background" Value="#2077CE"/><Setter TargetName="CheckSurface" Property="BorderBrush" Value="#2077CE"/><Setter TargetName="CheckMark" Property="Opacity" Value="1"/></Trigger>
                     <Trigger Property="IsPressed" Value="True"><Setter TargetName="CheckSurface" Property="Opacity" Value=".65"/></Trigger>
                     <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value=".4"/></Trigger>
+                    <MultiTrigger>
+                        <MultiTrigger.Conditions><Condition Property="Tag" Value="PeqBandToggle"/><Condition Property="IsEnabled" Value="False"/></MultiTrigger.Conditions>
+                        <Setter TargetName="CheckSurface" Property="Background" Value="#9BA1AB"/><Setter TargetName="CheckSurface" Property="BorderBrush" Value="#9BA1AB"/>
+                    </MultiTrigger>
                 </ControlTemplate.Triggers>
             </ControlTemplate></Setter.Value></Setter>
         </Style>

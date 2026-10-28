@@ -9,6 +9,7 @@ namespace Questyle.Desktop.Services;
 public sealed record PeqBand(bool Enabled, string Type, double Frequency, double Gain, double Q);
 public sealed record PeqSettings(bool Enabled, double Preamp, PeqBand[] Bands)
 {
+    public bool BandsEnabled { get; init; } = true;
     public static readonly string[] Types = ["PK", "LSC", "HSC", "LPQ", "HPQ", "NO"];
     public static PeqSettings Flat => new(false, 0, [.. new double[] { 31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000 }.Select(f => new PeqBand(true, "PK", f, 0, 0.70710678))]);
 
@@ -34,7 +35,7 @@ public sealed record PeqSettings(bool Enabled, double Preamp, PeqBand[] Bands)
         writer.Write(Enabled ? 1 : 0); writer.Write(Bands.Length); writer.Write(Preamp);
         foreach (var b in Bands)
         {
-            writer.Write(b.Enabled ? 1 : 0); writer.Write(Array.IndexOf(Types, b.Type));
+            writer.Write(BandsEnabled && b.Enabled ? 1 : 0); writer.Write(Array.IndexOf(Types, b.Type));
             writer.Write(b.Frequency); writer.Write(b.Gain); writer.Write(b.Q);
         }
         return stream.ToArray();
@@ -90,7 +91,7 @@ public sealed record PeqSettings(bool Enabled, double Preamp, PeqBand[] Bands)
         foreach (var b in Bands)
         {
             string gain = b.Type is "PK" or "LSC" or "HSC" ? FormattableString.Invariant($" Gain {b.Gain:R} dB") : "";
-            text.AppendLine(FormattableString.Invariant($"Filter: {(b.Enabled ? "ON" : "OFF")} {b.Type} Fc {b.Frequency:R} Hz{gain} Q {b.Q:R}"));
+            text.AppendLine(FormattableString.Invariant($"Filter: {(BandsEnabled && b.Enabled ? "ON" : "OFF")} {b.Type} Fc {b.Frequency:R} Hz{gain} Q {b.Q:R}"));
         }
         return text.ToString();
     }

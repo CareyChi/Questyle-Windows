@@ -71,6 +71,11 @@ public partial class App : Application
             Shutdown();
             return;
         }
+        if (e.Args is ["--update-handoff", var handoffFile])
+        {
+            _ = ContinueUpdateAsync(handoffFile);
+            return;
+        }
         instance = new SingleInstance("Questyle.Windows", () => Dispatcher.BeginInvoke(() => ((MainWindow)MainWindow).Restore()));
         if (!instance.IsPrimary)
         {
@@ -81,6 +86,36 @@ public partial class App : Application
 
         var window = new MainWindow();
         MainWindow = window;
+        StartPrimary(window);
+        window.Show();
+    }
+
+    // Started by the previous version after it installed this one. The single-instance
+    // lock and tray icon are taken over only after the previous process has exited.
+    private async Task ContinueUpdateAsync(string handoffFile)
+    {
+        var window = new MainWindow();
+        MainWindow = window;
+        try
+        {
+            await window.ContinueUpdateAsync(UpdateHandoff.Load(handoffFile), () =>
+            {
+                instance = new SingleInstance("Questyle.Windows", () => Dispatcher.BeginInvoke(() => ((MainWindow)MainWindow).Restore()));
+                if (!instance.IsPrimary) throw new InvalidOperationException("Another Questyle instance started during the update.");
+                StartPrimary(window);
+            });
+        }
+        catch (Exception ex)
+        {
+            // Before the ready signal, the previous version rolls back once this process exits.
+            File.WriteAllText(Path.Combine(AppPaths.DataDirectory, "update-handoff-error.log"), ex.ToString());
+            Shutdown(1);
+        }
+    }
+
+    private void StartPrimary(MainWindow window)
+    {
+        window.StartUpdateChecks();
         var menu = new Forms.ContextMenuStrip();
         using (var installedFonts = new System.Drawing.Text.InstalledFontCollection())
         {
@@ -101,7 +136,6 @@ public partial class App : Application
             Visible = true
         };
         tray.DoubleClick += (_, _) => window.Restore();
-        window.Show();
     }
 
     protected override void OnExit(ExitEventArgs e)

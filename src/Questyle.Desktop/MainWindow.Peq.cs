@@ -18,6 +18,7 @@ namespace Questyle.Desktop;
 public partial class MainWindow
 {
     private readonly CheckBox peqEnabled = new();
+    private readonly CheckBox peqBandsEnabled = new() { IsChecked = true };
     private readonly TextBox peqPreamp = new() { Width = 64, Height = 36, Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(0, 0, 12, 0), VerticalContentAlignment = VerticalAlignment.Center, Text = "0" };
     private readonly TextBlock peqState = new();
     private string peqStateText = "";
@@ -89,7 +90,22 @@ public partial class MainWindow
         var plot = new Border { Background = Color("#F7F9FC"), BorderBrush = Color("#E7E9ED"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(7), Child = plotContent, Margin = new Thickness(0, 0, 0, 8) };
         var tableHeader = PeqGrid(); tableHeader.HorizontalAlignment = HorizontalAlignment.Left;
         string[] labels = ["启用", "类型", "频率 (Hz)", "增益 (dB)", "Q", ""];
-        for (int i = 0; i < labels.Length; i++) { var label = Text(labels[i], 13); label.Foreground = muted; label.Margin = i is >= 1 and <= 4 ? new Thickness(24, 5, 15, 5) : new Thickness(0, 5, i == 0 ? 7 : 0, 5); if (i == 0) label.TextAlignment = TextAlignment.Center; Grid.SetColumn(label, i); tableHeader.Children.Add(label); }
+        for (int i = 0; i < labels.Length; i++)
+        {
+            var label = Text(labels[i], 13); label.Foreground = muted;
+            label.Margin = i is >= 1 and <= 4 ? new Thickness(24, 5, 15, 5) : new Thickness(0, 5, 0, 5);
+            FrameworkElement cell = label;
+            if (i == 0)
+            {
+                label.VerticalAlignment = VerticalAlignment.Center;
+                peqBandsEnabled.Style = (Style)FindResource("StartupToggle");
+                peqBandsEnabled.LayoutTransform = new ScaleTransform(2d / 3, 2d / 3);
+                peqBandsEnabled.Margin = new Thickness(6, 0, 0, 0);
+                Localize(peqBandsEnabled, ToolTipProperty, "启用滤波器");
+                cell = Row(label, peqBandsEnabled); cell.HorizontalAlignment = HorizontalAlignment.Center; cell.Margin = new Thickness(0, 0, 7, 0);
+            }
+            Grid.SetColumn(cell, i); tableHeader.Children.Add(cell);
+        }
         var rowPanel = new FrameworkElementFactory(typeof(VirtualizingStackPanel));
         peqRows.ItemsPanel = new ItemsPanelTemplate(rowPanel);
         VirtualizingPanel.SetIsVirtualizing(peqRows, true); VirtualizingPanel.SetVirtualizationMode(peqRows, VirtualizationMode.Recycling); VirtualizingPanel.SetScrollUnit(peqRows, ScrollUnit.Pixel);
@@ -132,13 +148,18 @@ public partial class MainWindow
         peqCard = Card(""); peqCard.Child = editor; peqCard.Padding = new Thickness(20); peqCard.Margin = new Thickness(0);
         var page = Scroll(peqCard);
         peqEnabled.Click += (_, _) => PeqEdited(); peqCurve.SizeChanged += (_, _) => DrawPeq();
+        peqBandsEnabled.Click += (_, _) =>
+        {
+            UpdatePeqBandToggles(); PeqEdited();
+            PeqAction(FlushPeq);
+        };
         ConfigurePeqInput(peqPreamp, "Preamp");
         SmoothScrolling.SetHandlesWheel(peqPreamp, true);
         peqPreamp.PreviewMouseWheel += (_, e) => { if (double.TryParse(peqPreamp.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out var value)) { SetPeqInputValue(peqPreamp, "Preamp", value + (e.Delta > 0 ? 1 : -1)); e.Handled = true; } };
         peqCurve.MouseLeftButtonDown += (_, e) => { peqFrequencyAnimating = false; peqCurveDrag = e.GetPosition(peqCurve); peqCurveDragScale = peqFrequencyScale; peqCurve.CaptureMouse(); e.Handled = true; };
         peqCurve.MouseDown += (_, e) =>
         {
-            if (e.ChangedButton != MouseButton.Middle) return;
+            if (e.ChangedButton != MouseButton.Right) return;
             peqCurveDrag = null;
             peqCurve.ReleaseMouseCapture();
             peqFrequencyFrom = peqFrequencyScale; peqFrequencyTarget = 2;
@@ -184,7 +205,7 @@ public partial class MainWindow
     private static Grid PeqGrid()
     {
         var grid = new Grid();
-        foreach (var width in new[] { new GridLength(52), new GridLength(100), new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star), new GridLength(44) }) grid.ColumnDefinitions.Add(new() { Width = width });
+        foreach (var width in new[] { new GridLength(104), new GridLength(100), new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star), new GridLength(44) }) grid.ColumnDefinitions.Add(new() { Width = width });
         return grid;
     }
     private FrameworkElement BuildPeqModeSelector()
@@ -359,7 +380,8 @@ public partial class MainWindow
     }
     private void AddPeqRow(PeqBand band)
     {
-        var enabled = new CheckBox { IsChecked = band.Enabled, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        var enabled = new CheckBox { IsChecked = band.Enabled, IsEnabled = peqBandsEnabled.IsChecked == true, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        enabled.Tag = "PeqBandToggle";
         Localize(enabled, ToolTipProperty, "启用滤波器");
         var type = new ComboBox { ItemsSource = PeqSettings.Types, SelectedItem = band.Type, Height = 29.7, MinHeight = 0, Padding = new Thickness(8, 1, 28, 1) };
         TextBox number(double value, string format = "G") => new() { Text = value.ToString(format, CultureInfo.CurrentCulture), Height = 29.7, Padding = new Thickness(8, 1, 8, 1), VerticalContentAlignment = VerticalAlignment.Center };
@@ -384,10 +406,10 @@ public partial class MainWindow
     {
         // Fix each editor's measured width once the viewport exists, so text changes
         // only lay out that editor instead of propagating intrinsic sizes through every row.
-        if (peqTable.ViewportWidth <= 196) return;
+        if (peqTable.ViewportWidth <= 248) return;
         grid.Width = peqTable.ViewportWidth; grid.Height = 29.7;
         row.Type.Width = 70;
-        row.Frequency.Width = row.Gain.Width = row.Q.Width = (peqTable.ViewportWidth - 196) / 3 - 30;
+        row.Frequency.Width = row.Gain.Width = row.Q.Width = (peqTable.ViewportWidth - 248) / 3 - 30;
     }
     private void SetPeq(PeqSettings settings)
     {
@@ -397,7 +419,7 @@ public partial class MainWindow
         ClearPeqUndo();
         try
         {
-            peqEnabled.IsChecked = settings.Enabled; peqPreamp.Text = settings.Preamp.ToString("G", CultureInfo.CurrentCulture);
+            peqEnabled.IsChecked = settings.Enabled; peqBandsEnabled.IsChecked = settings.BandsEnabled; peqPreamp.Text = settings.Preamp.ToString("G", CultureInfo.CurrentCulture);
             peqEditors.Clear(); peqRows.Items.Clear(); foreach (var band in settings.Bands) AddPeqRow(band);
         }
         finally { peqLoading = false; }
@@ -426,7 +448,7 @@ public partial class MainWindow
     private PeqSettings GetPeq()
     {
         double number(TextBox box) => double.Parse(box.Text, NumberStyles.Float, CultureInfo.CurrentCulture);
-        var settings = new PeqSettings(peqEnabled.IsChecked == true, number(peqPreamp), [.. peqEditors.Select(row => new PeqBand(row.Enabled.IsChecked == true, (string)row.Type.SelectedItem, number(row.Frequency), number(row.Gain), number(row.Q)))]);
+        var settings = new PeqSettings(peqEnabled.IsChecked == true, number(peqPreamp), [.. peqEditors.Select(row => new PeqBand(row.Enabled.IsChecked == true, (string)row.Type.SelectedItem, number(row.Frequency), number(row.Gain), number(row.Q)))]) { BandsEnabled = peqBandsEnabled.IsChecked == true };
         settings.Validate(); return settings;
     }
     private void ConfigurePeqValueDrag(TextBox box, string parameter)
@@ -623,8 +645,13 @@ public partial class MainWindow
     }
     private void UpdatePeqControls()
     {
-        peqPreamp.IsEnabled = peqEnabled.IsEnabled = peqAdd.IsEnabled = peqImport.IsEnabled = peqExport.IsEnabled = peqReset.IsEnabled = peqTable.IsEnabled = peqProfileLoaded;
+        peqPreamp.IsEnabled = peqEnabled.IsEnabled = peqBandsEnabled.IsEnabled = peqAdd.IsEnabled = peqImport.IsEnabled = peqExport.IsEnabled = peqReset.IsEnabled = peqTable.IsEnabled = peqProfileLoaded;
         peqApply.IsEnabled = peqProfileLoaded;
+        UpdatePeqBandToggles();
+    }
+    private void UpdatePeqBandToggles()
+    {
+        foreach (var row in peqEditors) row.Enabled.IsEnabled = peqBandsEnabled.IsChecked == true;
     }
     private void MonitorPeqPage(bool active)
     {
@@ -776,7 +803,7 @@ public partial class MainWindow
         try
         {
             var current = GetPeq();
-            var settings = current with { Preamp = 0 };
+            var settings = current with { Preamp = 0, BandsEnabled = true };
             peqPlotLeft = 30; peqPlotRight = peqCurve.ActualWidth - 14; peqPlotTop = 8; peqPlotBottom = peqCurve.Height - 22;
             peqPlotUpper = Math.Min(20000, peqPreviewRate * .49);
             // A fixed log + linear grid stays dense at both ends without recalculating DSP during axis drags.
@@ -786,7 +813,7 @@ public partial class MainWindow
             var response = settings.ResponseCurve(frequencies, peqPreviewRate);
             var samples = frequencies.Select((f, i) => (Frequency: f, Db: Math.Max(-60, response[i]))).ToArray();
             double maximum = samples.Max(s => s.Db), minimum = samples.Min(s => s.Db);
-            SetPeqWarning(current.Enabled && maximum + current.Preamp > .000001);
+            SetPeqWarning(current.Enabled && (current.BandsEnabled ? maximum : 0) + current.Preamp > .000001);
             peqTargetMaximum = Math.Max(3, Math.Ceiling(maximum / 3) * 3);
             peqTargetMinimum = Math.Min(-3, Math.Floor(minimum / 3) * 3);
             peqResponseAnimating = peqSmoothEditPending && peqSamples.Length > 1 && peqResponseLine != null;
@@ -957,6 +984,7 @@ public partial class MainWindow
             visible &= labelX >= previousRight + 2;
             if (visible) { peqVisibleFrequencyLabels.Add(label); ((TranslateTransform)label.RenderTransform).X = labelX; Canvas.SetTop(label, peqPlotBottom + 3); previousRight = labelX + labelWidth; }
         }
+        peqResponseLine.SetStroke(peqBandsEnabled.IsChecked == true ? readAccent : muted);
         var points = new PointCollection(peqSamples.Select(s => new Point(PeqX(s.Frequency), PeqY(s.Db)))); points.Freeze(); peqResponseLine.Draw(points);
         UpdatePeqHover();
     }

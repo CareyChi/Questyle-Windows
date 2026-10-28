@@ -29,7 +29,7 @@ public static class PeqExport
         {
             var band = bands[i];
             var type = band.Type switch { "PK" => "Bell", "LSC" => "Lo-shelf", "HSC" => "Hi-shelf", "LPQ" => "Lo-pass", "HPQ" => "Hi-pass", "NO" => "Notch", _ => throw new InvalidDataException("不支持的滤波器类型：" + band.Type) };
-            channel.Add("band" + i, new { type, mode = "APO (DR)", slope = "x1", solo = false, mute = !band.Enabled, gain = band.Gain, frequency = band.Frequency, q = band.Q, width = 4.0 });
+            channel.Add("band" + i, new { type, mode = "APO (DR)", slope = "x1", solo = false, mute = !settings.BandsEnabled || !band.Enabled, gain = band.Gain, frequency = band.Frequency, q = band.Q, width = 4.0 });
         }
         // Each EasyEffects gain stage accepts -36 to +36 dB.
         double inputGain = Math.Max(-36, settings.Preamp);

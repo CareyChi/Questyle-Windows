@@ -17,6 +17,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <AssemblyMetadata Include="DevBuildNumber" Value="$(DevBuildNumber)" Condition="'$(DevBuildNumber)' != ''" />
+    <AssemblyMetadata Include="BuildTimestamp" Value="$(BuildTimestamp)" Condition="'$(BuildTimestamp)' != ''" />
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
     <Content Include="Assets\*.png;Assets\*.ico" Link="assets\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

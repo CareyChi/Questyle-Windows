@@ -1,6 +1,6 @@
 # Questyle Windows 开发文档
 
-本文以 2026-10-26 当前源码为基准，记录现有功能、代码职责、运行流程和开发方式。协作约束见根目录 [AGENTS.md](../AGENTS.md)，界面细节见 [UI 样式规范](UI-STYLE.md)。
+本文以 2026-10-29 当前源码为基准，记录现有功能、代码职责、运行流程和开发方式。协作约束见根目录 [AGENTS.md](../AGENTS.md)，界面细节见 [UI 样式规范](UI-STYLE.md)。
 
 ## 1. 当前范围
 
@@ -96,7 +96,7 @@ Wi-Fi 播放器、本地音乐及底部播放栏已从源码移除，对应服�
 
 软件设置提供简体中文、繁体中文和 English，JSON 翻译位于 language 根部，即时应用并将选择保存到 data/settings.json。开机自启滑动开关读取和修改当前用户 HKCU/Software/Microsoft/Windows/CurrentVersion/Run 的 Questyle 项，命令中的 EXE 完整路径加引号；只有用户点击开关才写入。此系统注册使用 [Windows Run 启动项](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys)。
 
-主窗口不保留透明阴影边距，实际边界与外框一致。阴影由独立附属分层窗口绘制，中心透明，阴影为 32 DIP 模糊、0 偏移、不透明度 0.38，四边扩散一致，设置 [WS_EX_TRANSPARENT / WS_EX_NOACTIVATE](https://learn.microsoft.com/en-us/windows/win32/winmsg/extended-window-styles)，随主窗口移动、缩放、隐藏和退出。移动路径只在 WM_WINDOWPOSCHANGED 中用 SetWindowPos 改变阴影原生窗口的位置，复用 BitmapCache；不随每次移动重新创建尺寸和裁剪几何，尺寸/DPI 改变时才重建缓存。普通验证只离屏检查外环绘制，不显示窗口。
+主窗口不保留透明阴影边距，实际边界与外框一致。阴影由独立附属分层窗口绘制，中心透明，阴影为 32 DIP 模糊、0 偏移、不透明度 0.38，四边扩散一致，设置 [WS_EX_TRANSPARENT / WS_EX_NOACTIVATE](https://learn.microsoft.com/en-us/windows/win32/winmsg/extended-window-styles)，随主窗口移动、缩放、隐藏和退出。移动路径只在 WM_WINDOWPOSCHANGED 中用 SetWindowPos 改变阴影原生窗口的位置。阴影外观由 `ShadowFrame` 在 DPI 改变时预渲染一次（内框 130 DIP，四角各 92 DIP 覆盖圆角与模糊范围），绘制时四角原样、四边拉伸并对齐整像素；更新动画只改其 Bounds，逐帧不做模糊、布局或几何裁剪。普通验证只离屏检查外环绘制，不显示窗口。
 
 数据目录由 AppPaths 提供，默认启动 EXE 所在目录的 data，日志和诊断导出只写入该目录；应用启动时 TEMP/TMP 指向 data/temp。仅验证程序通过 QUESTYLE_DATA_DIR 使用独立目录，不自动迁移或删除旧的 LocalAppData 日志。已确认应用的声音设置保存到 data/audio-preferences.json：协议及 LDAC/Adaptive 模式按耳机地址分别保存，关闭麦克风和 Auracast 为全局选择。成功连接及首次/手动读取时在同一短 USB 会话内自动恢复；协议切换先读取并确认，再应用对应模式和全局开关，所有写入仍需 ACK 和匹配回读。未连接、耳机不支持保存协议或相关查询未知时不发送对应设置。未点击应用的编辑不保存。LC3 不发送麦克风指令，非 LC3 不发送 Auracast 指令。删除耳机记录同时删除该耳机的模式记忆，保留全局选择；已连接耳机名称和地址保存在 AppPaths.PairingFile，即启动 EXE 旁的 paired-headphones.json。QUESTYLE_DATA_DIR 同时覆盖测试耳机记录路径。记录文件需要程序目录可写，保存失败会报告错误，不转换成保存成功。不加载旧音乐库，不自动上传日志。原始日志可能包含耳机地址。
 
@@ -219,6 +219,30 @@ try {
 发布包根部包含 Questyle.exe、runtime、language 和空 eq-config；按 AGENTS.md 不附带 LICENSES、THIRD-PARTY-NOTICES.md、README.md，源仓库中的文件保留。DLL、运行库、图片集中在 runtime，用户提供的图标裁剪后生成 16–256 像素多尺寸 ICO，并用于根 EXE、窗口和托盘。三个应用翻译 JSON 放在 language 根部，通过 `SatelliteResourceLanguages=zh-Hans;zh-Hant` 只发布简繁中文的框架资源程序集，移至 `language/zh-hans` 和 `language/zh-hant`；英语使用框架自带的中性资源，不附带其余 11 种语言资源；LanguageResources 在默认资源解析失败时从指定文化目录加载，发布检查逐一验证 WPF/WinForms 资源的实际路径。SDK CreateAppHost 将根 EXE 绑定到 runtime/Questyle.dll；不引入额外启动进程。AppContext.BaseDirectory 指向 runtime，AppPaths.ApplicationDirectory 取实际 EXE 所在目录，耳机记录保存在该目录。打包清理前暂存已有耳机记录和 data 中的非临时数据，压缩包生成后或任一步失败时均写回本机目录，因此 ZIP 不携带本机耳机信息、日志或缓存。所有发布文件夹（含 assets、codecs 及地区资源目录）均为小写；源素材目录名与程序集文件名不受此规则影响。
 
 2026-10-28 按用户要求清理无用语言资源后运行 build.ps1 -SkipTests 打包，版本保持 0.1.0，用于 GitHub v0.1.0 功能预览发布；无窗口发布检查确认两个地区资源目录、原生 PEQ DLL 的加载及频响计算。后续仅在明确要求发布时使用发布流程。第三方资源说明见 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)。
+
+### 版本检查与 CI 发布约定
+
+设置页提供自动更新开关和正式／每日构建通道，保存到 `data/updates.json`；「检查版本更新」按钮位于关于页按钮行最右侧，结果显示在按钮右边。默认开启自动检查并使用正式通道；正常启动时检查一次，以后每 5 分钟检查一次，关闭后手动检查仍可用。切换通道后，无论是否开启自动检查都立即检查新通道。
+
+当前程序带有 DevBuildNumber 的是每日构建，否则视为正式版。所选通道与当前程序所属通道相同时，只提示更新的版本。两者不同时（即切换过通道），直接提示所选通道的最新版本，即使它的版本号更低。已经安装的同一版本（版本号和构建号都相同）永远不会再次提示，因此每日通道最新的是正式版时，装完不会反复提示。`UpdateChecker` 使用 GitHub Releases API，HTTP 客户端沿用 .NET 默认代理，读取 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY（支持 HTTP／SOCKS）或 Windows 用户代理／PAC；不探测端口、不绕过代理或证书校验。失败写入日志，手动检查显示简短结果。
+
+正式通道只接受带发布 ZIP 的正式 `vX.Y.Z`；每日通道从正式版和 `dev-build-编号` 中选最近公开的版本，构建号及基准版本分别来自标签和发布说明 `App-Version`。程序通过程序集元数据记录 DevBuildNumber、BuildTimestamp，避免把旧构建当成更新。发现更新后，侧栏版本号右侧显示红色 New，整行居中；仅检测到更新后，在版本号四周统一 14 DIP 的命中区域悬停，上方显示与侧栏横向居中的圆角阴影浮块，标题为 New version: x.x.x 或 Dev build xxx；显隐使用 100 毫秒淡入淡出，离开后延迟 150 毫秒开始关闭，移入浮块取消关闭。
+
+点击浮块中的更新按钮后执行下载、安装和进程交接（`MainWindow.UpdateFlow.cs`、`UpdateInstaller`）：
+
+1. 旧进程界面元素依次淡出并轻微缩小，窗口可见区域（圆角裁剪）与独立阴影窗口用同一缓动、同一起始帧收缩到居中的 380×160 DIP 更新窗口；三行内容随后依次淡入。HWND 尺寸不变，裁剪外为透明且鼠标穿透。过渡期间界面元素临时使用设备分辨率 BitmapCache（先在静止帧建立缓存再开始动画），阴影只移动预渲染的边角，两个分层窗口逐帧只做合成；思路与后续优化方向见[性能优化](PERFORMANCE.md)。
+2. 下载 GitHub 资产 API 地址（`Accept: application/octet-stream`）到 `data/temp/update/package.zip`，30 秒无数据视为超时，完成后校验 GitHub 公布的大小和 SHA-256；Releases 列表中没有 `sha256:` digest 的资产不作为可安装更新。进度每 50 毫秒刷新，大小按 1024 进制显示为两位小数的 KB／MB／GB；数字和单位按最宽字形固定单元绘制，`/` 居中，数值变化不移动整行。
+3. 标题切换为「正在安装: 版本」后解压，确认根目录 `questyle-windows-x64/Questyle.exe`。NTFS 允许重命名正在运行的映像，因此把发布包内的顶层项（`Questyle.exe`、`runtime`、`language` 等）逐个移到 `previous` 后放入新项；`data`、`eq-config`、`paired-headphones.json` 不打包也不替换。替换前已创建启动参数和事件，旧进程此后不再从程序目录加载新文件。任一步失败即逆序恢复。移动目录要求程序目录内没有未共享删除权限的打开句柄，因此窗口图标、设备图和编码 Logo 都以 `BitmapCacheOption.OnLoad` 一次读入内存后立即关闭文件。
+4. 新进程以 `--update-handoff data/temp/update/handoff.json` 启动，先以透明表面显示，按物理像素把同样内容的更新窗口放到旧窗口相同位置（窗口角到卡片的偏移取整像素，跨 DPI 移动后重新定位，最多 4 次），显示阴影并等待 4 个渲染帧后设置 `Local\Questyle.Windows.Update.<旧进程 PID>` 事件；旧进程收到后立即隐藏并正常退出。新进程等待旧进程退出后才获取单实例锁、托盘与更新检查，后台删除临时目录，再让三行依次淡出、窗口区域伸展到新版本自己的尺寸（中心不变）、界面元素依次淡入，最后恢复普通阴影与交互并执行一次常规前台检测。
+5. 新进程退出或 30 秒内未发出事件时，旧进程结束它、恢复旧文件并展开回原界面，状态栏显示简短错误，详情写入日志；新进程交接前的异常写入 `data/update-handoff-error.log`。下载阶段请求退出会取消下载并恢复后退出，安装阶段等待完成或恢复。更新期间暂停自动检查、USB 自动读取和窗口交互。
+
+设置页处于显示状态时，在 600 毫秒间隔内连续点击侧栏顶部标题 8 次，设置页底部显示本次运行有效的「开发者选项」，其中「模拟更新流程」按当前通道生成一个更新（正式版补丁号加 1，每日构建号加 1），自动检查不覆盖它。点击更新后只把下载换成模拟：后台把当前程序目录按发布 ZIP 布局无压缩打包（排除用户数据），进度按约 5 秒随机波动速度增长，总大小为程序文件合计；解压、替换、启动新进程、交接和展开与正式更新相同，因此会真实替换当前程序目录中的文件（内容与当前版本相同）。
+
+[Windows CI](../.github/workflows/windows.yml) 使用 Windows 2022、固定 .NET 8.0.426 与 llvm-mingw 20261020；[依赖准备脚本](../.github/scripts/Prepare-Ci.ps1) 下载公开工具及固定 Win32Metadata 提交的头文件并验证 SHA-256。这些临时文件进入原有 reverse 路径，APK、逆向证据和本机日志不上传。流程依次编译、运行无 USB 协议模拟／无窗口 UI／原生离线检查、打包并验证发布程序；PR 仅保存 ZIP 构建产物。
+
+main 的成功构建按工作流 run_number 发布 `Dev build xxx`，真实 Git 标签使用 `dev-build-xxx`，不包含空格。附带 ZIP 的大小及 GitHub SHA-256 验证通过后才公开，再删除其他已公开预发布及旧 dev-build 标签，正式版本和正式标签保留。工作流串行执行，预发布列表跟随新发布时间更新；正式版仍保留 GitHub Latest 标记。正式发布从 Actions 手动运行 Windows CI，channel 选 stable，使用项目中尚未发布的版本号；已存在的标签明确报错，不把新二进制附加到旧源码标签。正式发布保留最近的每日构建，新每日构建成功后再替换它。
+
+云端构建与发布结果见[验证记录](VERIFICATION.md)；真实代理连通性尚未验证。
 
 ## 7. 尚未完成及讨论范围
 

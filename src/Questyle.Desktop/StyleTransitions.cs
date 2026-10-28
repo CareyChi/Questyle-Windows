@@ -37,6 +37,19 @@ public static class StyleTransitions
         clock.Controller.SeekAlignedToLastTick(TimeSpan.Zero, TimeSeekOrigin.BeginTime);
     }
 
+    // Clocks started in one dispatcher operation share the same first frame,
+    // which keeps separate windows (main surface and shadow) moving together.
+    public static Task Start(IAnimatable target, DependencyProperty property, AnimationTimeline animation)
+    {
+        var completed = new TaskCompletionSource();
+        animation.Completed += (_, _) => completed.TrySetResult();
+        var clock = animation.CreateClock();
+        target.ApplyAnimationClock(property, clock, HandoffBehavior.SnapshotAndReplace);
+        clock.Controller!.Begin();
+        clock.Controller.SeekAlignedToLastTick(TimeSpan.Zero, TimeSeekOrigin.BeginTime);
+        return completed.Task;
+    }
+
     private static void Enable(DependencyObject target, DependencyPropertyChangedEventArgs e)
     {
         if (!(bool)e.NewValue) return;

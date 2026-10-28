@@ -69,12 +69,13 @@ public partial class MainWindow : Window
         InitializeComponent();
         FontFamily = new FontFamily("Microsoft YaHei, SimHei, " + SystemFonts.MessageFontFamily.Source);
         UsbDkTransport.HelperPath = Path.Combine(AppContext.BaseDirectory, "UsbDkHelper.dll");
-        Icon = BitmapFrame.Create(new Uri(Path.Combine(AppContext.BaseDirectory, "assets", "Questyle.ico")));
+        Icon = BitmapFrame.Create(new Uri(Path.Combine(AppContext.BaseDirectory, "assets", "Questyle.ico")), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
         BuildShell();
+        BuildUpdateCard();
         UiLanguage.Current.Changed += RefreshLanguage;
         SourceInitialized += (_, _) =>
         {
-            shadow = new WindowShadow(this);
+            shadow = new WindowShadow(this) { Suspended = updating };
             deviceWatcher = new DeviceChangeWatcher(HwndSource.FromHwnd(new WindowInteropHelper(this).Handle), change => HandleDeviceChange(change, RefreshUsbPresenceAsync));
             Dispatcher.BeginInvoke(UpdateWindowSizing);
         };
@@ -93,6 +94,13 @@ public partial class MainWindow : Window
     }
 
     private static string L(string value) => UiLanguage.Current[value];
+    // Read fully at load: an open image file would block moving the program folder during an update.
+    private static BitmapImage Asset(params string[] path)
+    {
+        var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
+        image.UriSource = new Uri(Path.Combine([AppContext.BaseDirectory, "assets", .. path])); image.EndInit(); image.Freeze();
+        return image;
+    }
     private static void Localize(DependencyObject target, DependencyProperty property, string key) => BindingOperations.SetBinding(target, property, new Binding("[" + key + "]") { Source = UiLanguage.Current });
     private TextBlock Text(string value, double size = 14, bool bold = false)
     {
@@ -123,8 +131,8 @@ public partial class MainWindow : Window
         var side = new DockPanel();
         var brandText = Text("Questyle", 28, true); brandText.HorizontalAlignment = HorizontalAlignment.Center; brandText.TextAlignment = TextAlignment.Center;
         var brand = Column(brandText); brand.Margin = new Thickness(20, 28, 20, 28);
-        ((TextBlock)brand.Children[0]).Foreground = Brushes.White; DockPanel.SetDock(brand, Dock.Top); side.Children.Add(brand);
-        var edition = Note("Version: " + ApplicationVersion); edition.Margin = new Thickness(12, 20, 12, 14); edition.TextAlignment = TextAlignment.Center; DockPanel.SetDock(edition, Dock.Bottom); side.Children.Add(edition);
+        brandText.Foreground = Brushes.White; brandText.PreviewMouseLeftButtonDown += (_, _) => CountBrandClick(); DockPanel.SetDock(brand, Dock.Top); side.Children.Add(brand);
+        var edition = BuildVersionFooter(); DockPanel.SetDock(edition, Dock.Bottom); side.Children.Add(edition);
         var navigation = new StackPanel(); side.Children.Add(navigation);
         Root.Children.Add(new Border { Background = Color("#181B24"), Child = side });
         var body = new Grid { Background = Color("#F5F6F8") }; Grid.SetColumn(body, 1); Root.Children.Add(body);
@@ -149,6 +157,7 @@ public partial class MainWindow : Window
         var statusRow = new DockPanel();
         status.Visibility = Visibility.Hidden; status.FontSize = 13; status.Foreground = muted; status.Text = L("就绪"); status.TextTrimming = TextTrimming.CharacterEllipsis; statusRow.Children.Add(status);
         var statusBorder = new Border { Background = Color("#EDF0F4"), Padding = new Thickness(36, 7, 36, 5), Child = statusRow }; Grid.SetRow(statusBorder, 2); body.Children.Add(statusBorder);
+        RegisterShellParts(body, [brand, .. nav, edition, head, closeButton, content, statusBorder]);
         nav[0].RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
     }
     private void AddPage(string key, string label, string heading, FrameworkElement page, StackPanel navigation)
@@ -165,7 +174,7 @@ public partial class MainWindow : Window
         usbInfo.Foreground = muted; usbInfo.FontSize = 13; usbInfo.VerticalAlignment = VerticalAlignment.Center; usbInfo.Margin = new Thickness(12, 0, 0, 0);
         supportedInfo.Foreground = muted; supportedInfo.FontSize = 13; supportedInfo.TextWrapping = TextWrapping.Wrap; supportedInfo.LineHeight = 20; supportedInfo.Height = 40;
         var identity = new WrapPanel(); identity.Children.Add(usbName); identity.Children.Add(usbInfo);
-        var hero = new DockPanel(); var image = new Image { Source = new BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "assets", "dongle.png"))), Width = 100, Height = 80, Stretch = Stretch.Uniform, Margin = new Thickness(0, 0, 20, 0) }; DockPanel.SetDock(image, Dock.Left); hero.Children.Add(image);
+        var hero = new DockPanel(); var image = new Image { Source = Asset("dongle.png"), Width = 100, Height = 80, Stretch = Stretch.Uniform, Margin = new Thickness(0, 0, 20, 0) }; DockPanel.SetDock(image, Dock.Left); hero.Children.Add(image);
         readButton = AsyncButton("读取设备", ReadUsb, true); readButton.Background = readAccent; readButton.VerticalAlignment = VerticalAlignment.Center; DockPanel.SetDock(readButton, Dock.Right); hero.Children.Add(readButton); hero.Children.Add(Column(identity, supportedInfo));
         codecs.DisplayMemberPath = "Name"; ldac.ItemsSource = new[] { L("音质优先"), L("标准模式"), L("连接优先") }; ldac.SelectedIndex = 1; adaptive.ItemsSource = new[] { L("高音质模式"), L("低延迟模式") }; adaptive.SelectedIndex = 0;
         ldacField = Field("LDAC 模式", ldac, 8); adaptiveField = Field("aptX Adaptive 模式", adaptive, 8);
@@ -406,6 +415,7 @@ public partial class MainWindow : Window
         peqEndpointStatus = null;
         FormatPeqState();
         ResizePeqApplyForLanguage();
+        SetUpdateCheckStatus(updateCheckStatusKey);
         DrawPeq();
         title.Text = L(selectedPageHeading);
         var ldacIndex = ldac.SelectedIndex; var adaptiveIndex = adaptive.SelectedIndex;
@@ -442,7 +452,7 @@ public partial class MainWindow : Window
         var languageRow = new DockPanel();
         language.Width = 220; DockPanel.SetDock(language, Dock.Right); languageRow.Children.Add(language);
         var languageLabel = Text("语言"); languageLabel.VerticalAlignment = VerticalAlignment.Center; languageRow.Children.Add(languageLabel);
-        return Scroll(Card("软件设置", languageRow, startupRow), names);
+        return Scroll(Card("软件设置", [languageRow, startupRow, .. BuildUpdateSettings()]), names, BuildDeveloperCard());
     }
 
     private static string ApplicationVersion => typeof(MainWindow).Assembly.GetName().Version!.ToString(3);
@@ -451,7 +461,7 @@ public partial class MainWindow : Window
         var version = Note("Version: " + ApplicationVersion); version.Margin = new Thickness(0, 0, 0, 22);
         var export = Button("导出诊断日志", ExportLog); export.Margin = new Thickness(0, 0, 0, 14);
         var identity = Card("Questyle for Windows", version,
-            Row(Button("打开数据文件夹", () => Process.Start(new ProcessStartInfo(AppPaths.DataDirectory) { UseShellExecute = true })), Button("Questyle 官网", () => Process.Start(new ProcessStartInfo("https://www.questyle.com/") { UseShellExecute = true }))));
+            Row([Button("打开数据文件夹", () => Process.Start(new ProcessStartInfo(AppPaths.DataDirectory) { UseShellExecute = true })), Button("Questyle 官网", () => Process.Start(new ProcessStartInfo("https://www.questyle.com/") { UseShellExecute = true })), .. BuildUpdateCheck()]));
         ((FrameworkElement)((StackPanel)identity.Child).Children[0]).Margin = new Thickness(0, 0, 0, 10);
         var logCard = Card("运行日志", export, logBox); logCard.Margin = new Thickness(0);
         return Scroll(identity, logCard);
@@ -854,10 +864,12 @@ public partial class MainWindow : Window
     }
     private void OnClosing(object? sender, CancelEventArgs e)
     {
+        if (!exitRequested && updating) { e.Cancel = true; return; }
         if (!exitRequested) { e.Cancel = true; DismissSearch(); closeButton.Tag = null; closeButton.ReleaseMouseCapture(); Hide(); return; }
         if (busy) { e.Cancel = true; operationCancel?.Cancel(); SetStatus("正在结束操作…"); return; }
         deviceWatcher?.Dispose(); deviceWatcher = null;
         StopPeqMonitoring();
+        StopUpdateChecks();
         try { File.WriteAllText(Path.Combine(AppPaths.DataDirectory, "last-session.log"), log.ToString()); }
         catch (IOException ex) { Trace.WriteLine(ex); }
     }
@@ -899,7 +911,7 @@ public partial class MainWindow : Window
             "SBC" => ("sbc", new Int32Rect(0, 12, 204, 80), 34d),
             _ => ("", Int32Rect.Empty, 0d)
         };
-        codecLogo.Source = asset.Item1.Length == 0 ? null : new CroppedBitmap(new BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "assets", "codecs", asset.Item1 + ".png"))), asset.Item2);
+        codecLogo.Source = asset.Item1.Length == 0 ? null : new CroppedBitmap(Asset("codecs", asset.Item1 + ".png"), asset.Item2);
         codecLogo.Height = asset.Item3; codecLogo.Width = asset.Item3 == 0 ? 0 : asset.Item2.Width * asset.Item3 / asset.Item2.Height;
         codecLogo.ToolTip = codec;
         codecLogo.Visibility = pages["USB"].Visibility == Visibility.Visible && codecLogo.Source != null ? Visibility.Visible : Visibility.Collapsed;

@@ -6,15 +6,24 @@ namespace Questyle.Desktop;
 public sealed class PeqCurveVisual : FrameworkElement
 {
     private readonly DrawingVisual drawing = new();
-    private readonly Pen stroke;
+    private Pen stroke;
+    private Brush strokeBrush;
     private Point[] segments = [];
     public PointCollection Points { get; private set; } = [];
 
     public PeqCurveVisual(Brush brush)
     {
         IsHitTestVisible = false;
+        strokeBrush = brush;
         stroke = new Pen(brush.CloneCurrentValue(), 2); stroke.Freeze();
         AddVisualChild(drawing);
+    }
+
+    public void SetStroke(Brush brush)
+    {
+        if (ReferenceEquals(strokeBrush, brush)) return;
+        strokeBrush = brush;
+        stroke = new Pen(brush.CloneCurrentValue(), 2); stroke.Freeze();
     }
 
     public void Draw(PointCollection points)

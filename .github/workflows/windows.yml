@@ -1,0 +1,91 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        type: choice
+        options: [development, stable]
+        default: development
+
+permissions:
+  contents: read
+
+# Serialize complete runs so an older build cannot replace a newer prerelease.
+concurrency:
+  group: windows-${{ github.event_name == 'pull_request' && github.ref || 'releases' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '8.0.426'
+      - name: Prepare pinned native build dependencies
+        shell: pwsh
+        run: ./.github/scripts/Prepare-Ci.ps1
+      - name: Set build identity
+        id: identity
+        shell: pwsh
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel || 'development' }}
+        run: |
+          [xml]$project = Get-Content src/Questyle.Desktop/Questyle.Desktop.csproj
+          $version = [string]$project.Project.PropertyGroup.Version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "BuildTimestamp=$([DateTimeOffset]::UtcNow.ToString('O'))" >> $env:GITHUB_ENV
+          if ($env:RELEASE_CHANNEL -eq 'development') { "DevBuildNumber=$env:GITHUB_RUN_NUMBER" >> $env:GITHUB_ENV }
+      - name: Build Release
+        run: dotnet build Questyle.sln -c Release
+      - name: Verify protocol without USB
+        run: dotnet run --project tests/Questyle.Verification -c Release --no-build
+      - name: Verify UI without a window
+        shell: pwsh
+        run: |
+          $env:QUESTYLE_DATA_DIR = Join-Path $env:RUNNER_TEMP 'questyle-ui-verification'
+          dotnet run --project tests/Questyle.UiVerification -c Release --no-build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify native PEQ without installation
+        shell: pwsh
+        run: ./tests/Questyle.Peq.NativeVerification/verify.ps1 -DataDirectory (Join-Path $env:RUNNER_TEMP 'questyle-native-verification')
+      - name: Package and verify startup
+        shell: pwsh
+        run: ./build.ps1 -SkipTests
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-x64-${{ github.run_number }}
+          path: dist/questyle-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-x64-${{ github.run_number }}
+          path: dist
+      - name: Publish verified build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANNEL: ${{ inputs.channel || 'development' }}
+          APP_VERSION: ${{ needs.build.outputs.version }}
+        run: ./.github/scripts/Publish-Release.ps1 -Channel $env:RELEASE_CHANNEL -Version $env:APP_VERSION -BuildNumber $env:GITHUB_RUN_NUMBER

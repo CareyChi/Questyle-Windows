@@ -12,6 +12,8 @@ using System.Windows.Media.Effects;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Text.Json;
+using System.Net;
+using System.Net.Http;
 using Questyle.Desktop;
 using Questyle.Desktop.Services;
 
@@ -34,7 +36,7 @@ static class Program
             double editorX = editor.TranslatePoint(new Point(editor.Padding.Left + editor.BorderThickness.Left, 0), root).X;
             if (Math.Abs(label.TranslatePoint(new Point(), root).X - editorX) > 1.5) throw new Exception("PEQ heading is not aligned with its editor content: " + label.Text);
         }
-        var enabledLabel = header.Children.OfType<TextBlock>().Single(label => Grid.GetColumn(label) == 0);
+        var enabledLabel = header.Children.OfType<FrameworkElement>().Single(label => Grid.GetColumn(label) == 0);
         var enabled = row.Children.OfType<CheckBox>().Single(); enabled.ApplyTemplate();
         var check = (Border)enabled.Template.FindName("CheckSurface", enabled);
         double labelCentre = enabledLabel.TranslatePoint(new Point(enabledLabel.ActualWidth / 2, 0), root).X;
@@ -58,6 +60,7 @@ static class Program
         Check(AppPaths.DefaultDataDirectory == Path.Combine(AppPaths.ApplicationDirectory, "data") && Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar) == Path.Combine(AppPaths.DataDirectory, "temp"), "application defaults and temporary files stay under the application data directory");
         File.Delete(AppPaths.PairingFile);
         File.Delete(Path.Combine(AppPaths.DataDirectory, "settings.json"));
+        File.Delete(Path.Combine(AppPaths.DataDirectory, "updates.json"));
         File.Delete(Path.Combine(AppPaths.DataDirectory, "audio-preferences.json"));
         File.Delete(Path.Combine(AppPaths.DataDirectory, "original-device-name.txt"));
         File.Delete(Path.Combine(AppPaths.DataDirectory, "peq.json"));
@@ -74,6 +77,12 @@ static class Program
         var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
         var window = new MainWindow();
+        if (args is ["--updates-only"])
+        {
+            try { Render(window, "update-anchor", 1240, 800); VerifyUpdates(window); Console.WriteLine($"{count} focused update checks passed."); }
+            finally { window.RequestExit(); application.Shutdown(); }
+            return;
+        }
         var livePeqWrites = new List<PeqSettings>();
         typeof(MainWindow).GetField("peqWriteConfiguration", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, (Func<PeqSettings, long>)(settings => { livePeqWrites.Add(settings); return livePeqWrites.Count; }));
         Invoke(window, "RememberOriginalName", "首次设备名称");
@@ -185,6 +194,11 @@ static class Program
             var peqPages = Field<Dictionary<string, FrameworkElement>>(window, "pages");
             Check(peqPages.Keys.SequenceEqual(new[] { "USB", "PEQ", "SETTINGS", "ABOUT" }) && peqPages["PEQ"].Visibility == Visibility.Visible, "PEQ navigation is immediately before Settings");
             var peqDefinition = PeqSettings.Parse("Preamp: -5 dB\nFilter: ON PK Fc 1000 Hz Gain 6 dB Q 1\nFilter 2: OFF HSC Fc 8000 Hz Gain -3 dB Q 0.7");
+            var bypassedBands = peqDefinition with { BandsEnabled = false };
+            Check(Math.Abs(bypassedBands.Response(1000, 48000) + 5) < .001 && bypassedBands.Bands.SequenceEqual(peqDefinition.Bands), "band bypass keeps preamp processing and every original per-band choice");
+            var bypassRoundtrip = JsonSerializer.Deserialize<PeqSettings>(JsonSerializer.Serialize(bypassedBands))!;
+            Check(!bypassRoundtrip.BandsEnabled && bypassRoundtrip.Bands.SequenceEqual(peqDefinition.Bands) && Math.Abs((bypassRoundtrip with { BandsEnabled = true }).Response(1000, 48000) - 1) < .001, "reopening and reenabling bypassed bands restores the original response");
+            Check(JsonSerializer.Deserialize<PeqSettings>("{\"Enabled\":true,\"Preamp\":0,\"Bands\":[]}")!.BandsEnabled, "existing presets default to enabled bands without migration");
             Check(Math.Abs(peqDefinition.Response(1000, 48000) - 1) < 0.001, "PEQ preview uses the independent native response and includes preamp");
             Check(PeqSettings.Parse(peqDefinition.Export()).Bands.SequenceEqual(peqDefinition.Bands), "PEQ text roundtrip preserves disabled bands and precise parameters");
             var wavelet = PeqExport.Wavelet(peqDefinition);
@@ -226,6 +240,28 @@ static class Program
             try { peqDefinition.ResponseCurve([24000], 48000); throw new Exception("Invalid preview frequency accepted"); } catch (ArgumentException) { Check(true, "batched preview rejects frequencies at Nyquist"); }
             Invoke(window, "SetPeq", peqDefinition);
             Render(window, "peq", 1240, 800);
+            var allBandsToggle = Field<CheckBox>(window, "peqBandsEnabled");
+            var bandsToggleSize = allBandsToggle.LayoutTransform.TransformBounds(new Rect(allBandsToggle.RenderSize));
+            Check(bandsToggleSize.Width is >= 31 and <= 33 && bandsToggleSize.Height is >= 18 and <= 20, "the filter heading switch fits beside its label at approximately 32 by 19 DIP");
+            var originalCurve = Field<PeqCurveVisual>(window, "peqResponseLine").Points.ToArray();
+            var bandChoices = Descendants<CheckBox>(Field<ScrollViewer>(window, "peqTable")).ToArray();
+            var originalChoices = bandChoices.Select(box => box.IsChecked).ToArray();
+            allBandsToggle.IsChecked = false; allBandsToggle.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            SettleTransitions();
+            Invoke(window, "DrawPeq");
+            var bypassCurve = Field<PeqCurveVisual>(window, "peqResponseLine");
+            var bypassDrawing = (DrawingVisual)VisualTreeHelper.GetChild(bypassCurve, 0);
+            var bypassStroke = ((GeometryDrawing)bypassDrawing.Drawing.Children.Single()).Pen.Brush;
+            Check(bypassCurve.Points.SequenceEqual(originalCurve) && ((SolidColorBrush)bypassStroke).Color == ((SolidColorBrush)Field<Brush>(window, "muted")).Color, "bypassing filters retains the exact curve geometry and renders it grey");
+            Render(window, "peq-bands-paused", 1240, 800);
+            var bypassedUi = (PeqSettings)Invoke(window, "GetPeq")!;
+            Check(bandChoices.All(box => !box.IsEnabled) && bandChoices.Select(box => box.IsChecked).SequenceEqual(originalChoices) && !bypassedUi.BandsEnabled && bypassedUi.Preamp == peqDefinition.Preamp, "filter master switch disables all row toggles without changing their choices or preamp");
+            Check(bandChoices.All(box => ((SolidColorBrush)((Border)box.Template.FindName("CheckSurface", box)).Background).Color == Color.FromRgb(0x9B, 0xA1, 0xAB)), "bypassed filter checkboxes use a grey surface while retaining their checkmarks");
+            allBandsToggle.IsChecked = true; allBandsToggle.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Invoke(window, "DrawPeq");
+            var restoredDrawing = (DrawingVisual)VisualTreeHelper.GetChild(Field<PeqCurveVisual>(window, "peqResponseLine"), 0);
+            Check(((SolidColorBrush)((GeometryDrawing)restoredDrawing.Drawing.Children.Single()).Pen.Brush).Color == ((SolidColorBrush)Field<Brush>(window, "readAccent")).Color, "reenabling filters restores the curve's active color");
+            Check(bandChoices.All(box => box.IsEnabled) && bandChoices.Select(box => box.IsChecked).SequenceEqual(originalChoices), "reenabling all bands preserves the individual selection pattern");
             VerifyPeqHeaderAlignment(window);
             Check(true, "PEQ headings align with editor content and the checkbox after narrowing the controls");
             Check(Field<Canvas>(window, "peqCurve").Children.OfType<PeqCurveVisual>().Count() == 1, "PEQ frequency response renders offscreen");
@@ -258,8 +294,9 @@ static class Program
             var points = curve.Children.OfType<PeqCurveVisual>().Single().Points.ToArray();
             Invoke(window, "SetPeq", peqDefinition with { Preamp = 7 });
             Check(points.SequenceEqual(curve.Children.OfType<PeqCurveVisual>().Single().Points), "PEQ curve is independent of preamp");
-            var peqButtons = Descendants<Button>(peqPages["PEQ"]).Select(button => button.Content?.ToString()).ToArray();
-            Check(new[] { "添加滤波器", "应用", "导入", "导出", "安装音频驱动" }.SequenceEqual(peqButtons.Where(value => value is "添加滤波器" or "应用" or "导入" or "导出" or "安装音频驱动")) && Field<Border>(window, "peqApplySlot").Width == 0 && Field<bool>(window, "peqLive"), "PEQ defaults to live mode, hides the apply action and places export after import");
+            var peqButtons = Descendants<Button>(peqPages["PEQ"]).ToArray();
+            var peqActions = new[] { "peqAdd", "peqApply", "peqImport", "peqExport", "peqInstall" }.Select(name => Field<Button>(window, name)).ToArray();
+            Check(peqActions.SequenceEqual(peqButtons.Where(peqActions.Contains)) && Field<Border>(window, "peqApplySlot").Width == 0 && Field<bool>(window, "peqLive"), "PEQ defaults to live mode, hides the apply action and places export after import");
             Invoke(window, "ShowPeqExport");
             var exportOverlay = (Grid)typeof(MainWindow).GetField("PeqExportOverlay", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
             Check(exportOverlay.Visibility == Visibility.Visible && !Field<Grid>(window, "Root").IsEnabled && new[] { "Equalizer APO", "Wavelet", "EasyEffects" }.All(name => Descendants<Button>(exportOverlay).Any(button => Equals(button.Content, name))), "export opens a modal overlay with all three target formats");
@@ -373,14 +410,16 @@ static class Program
                 Invoke(window, "SetPeqFrequencyScale", edge);
                 string beforeMiddlePreset = ((PeqSettings)Invoke(window, "GetPeq")!).Export();
                 curve.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Middle) { RoutedEvent = Mouse.MouseDownEvent });
-                Check(Field<double>(window, "peqFrequencyScale") == edge && Field<bool>(window, "peqFrequencyAnimating"), "middle-click reset starts from the displayed axis position at limit " + edge);
+                Check(!Field<bool>(window, "peqFrequencyAnimating"), "middle-click leaves the axis position unchanged");
+                curve.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Right) { RoutedEvent = Mouse.MouseDownEvent });
+                Check(Field<double>(window, "peqFrequencyScale") == edge && Field<bool>(window, "peqFrequencyAnimating"), "right-click reset starts from the displayed axis position at limit " + edge);
                 typeof(MainWindow).GetField("peqFrequencyStart", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, Stopwatch.GetTimestamp() - (long)(Stopwatch.Frequency * .09));
                 Invoke(window, "RenderPeqFrame", null!, EventArgs.Empty);
                 double middleScale = Field<double>(window, "peqFrequencyScale");
-                Check(edge == 1 ? middleScale is > 1 and < 2 : middleScale is > 2 and < 3, "middle-click reset passes through an intermediate axis position");
+                Check(edge == 1 ? middleScale is > 1 and < 2 : middleScale is > 2 and < 3, "right-click reset passes through an intermediate axis position");
                 typeof(MainWindow).GetField("peqFrequencyStart", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, Stopwatch.GetTimestamp() - Stopwatch.Frequency);
                 Invoke(window, "RenderPeqFrame", null!, EventArgs.Empty);
-                Check(Field<double>(window, "peqFrequencyScale") == 2 && !Field<bool>(window, "peqFrequencyAnimating") && beforeMiddlePreset == ((PeqSettings)Invoke(window, "GetPeq")!).Export(), "middle-click transition ends at the exact center without changing filters");
+                Check(Field<double>(window, "peqFrequencyScale") == 2 && !Field<bool>(window, "peqFrequencyAnimating") && beforeMiddlePreset == ((PeqSettings)Invoke(window, "GetPeq")!).Export(), "right-click transition ends at the exact center without changing filters");
             }
             Invoke(window, "SetPeq", peqDefinition);
             table.UpdateLayout();
@@ -759,7 +798,13 @@ static class Program
                 return edges.Max() - edges.Min() <= 2;
             });
             Check(equalShadowEdges, "window shadow has matching alpha falloff at equal distances on all four edges");
-            Check(shadowSurface.CacheMode is BitmapCache, "shadow surface reuses a cached bitmap while moving");
+            var shadowFrame = (FrameworkElement)Activator.CreateInstance(typeof(MainWindow).Assembly.GetType("Questyle.Desktop.ShadowFrame")!)!;
+            shadowFrame.GetType().GetMethod("Prepare")!.Invoke(shadowFrame, [1d]);
+            shadowFrame.GetType().GetProperty("Bounds")!.SetValue(shadowFrame, new Rect(0, 0, 400, 300));
+            RenderElement(shadowFrame, "window-shadow-frame", 456, 356);
+            var framePixels = new byte[456 * 356 * 4];
+            new BitmapImage(new Uri(Path.Combine(AppPaths.DataDirectory, "window-shadow-frame.png"))).CopyPixels(framePixels, 456 * 4, 0);
+            Check(Enumerable.Range(0, 456 * 356).Max(i => Math.Abs(framePixels[i * 4 + 3] - pixels[i * 4 + 3])) <= 2, "the animated shadow, assembled from pre-rendered corners and edges, matches the blurred shadow");
             var frameBorder = (Border)window.FindName("WindowFrame");
             Check(frameBorder.Margin == new Thickness(0) && frameBorder.Effect == null, "main window bounds match the visible frame without shadow padding");
             Check(Math.Abs(frameBorder.BorderThickness.Left * VisualTreeHelper.GetDpi(window).DpiScaleX - 1) < .01, "window border remains one physical pixel thick with antialiased curves");
@@ -802,6 +847,7 @@ static class Program
             double firstCharacterLeft = nameInput.GetRectFromCharacterIndex(0).Left;
             Check(firstCharacterLeft >= nameInput.Padding.Left && firstCharacterLeft < nameInput.Padding.Left + 5, $"text input uses one padding plus the native text inset: {firstCharacterLeft}");
             VerifySettingsAlignment(window);
+            VerifyUpdates(window);
             var footerVersion = Descendants<TextBlock>((DependencyObject)window.Content).Single(text => text.Text == "Version: 0.1.0" && text.TextAlignment == TextAlignment.Center);
             Check(footerVersion.TextAlignment == TextAlignment.Center && footerVersion.Margin.Left == footerVersion.Margin.Right, "sidebar version uses the Version label and symmetric horizontal alignment");
 
@@ -1347,6 +1393,229 @@ static class Program
         Invoke(window, "SetPeq", definition with { Preamp = 7 });
     }
 
+    private static void VerifyUpdates(MainWindow window)
+    {
+        object Release(string tag, bool prerelease, string published, string body = "", bool draft = false) => new
+        {
+            tag_name = tag, prerelease, published_at = published, body, draft,
+            assets = new[] { new { name = "questyle-windows-x64.zip", state = "uploaded", url = "https://api.github.com/repos/CareyChi/Questyle-Windows/releases/assets/1", size = 3, digest = "sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData("zip"u8)).ToLowerInvariant() } }
+        };
+        var json = JsonSerializer.Serialize(new[]
+        {
+            Release("dev-build-18", true, "2026-10-29T06:00:00Z", "App-Version: 0.2.0"),
+            Release("v0.2.0", false, "2026-10-29T05:00:00Z"),
+            Release("v9.0.0", false, "2026-10-29T07:00:00Z", draft: true),
+            Release("unrecognized", true, "2026-10-29T08:00:00Z")
+        });
+        using var catalog = JsonDocument.Parse(json);
+        var stable = UpdateChecker.SelectRelease(catalog.RootElement, UpdateChannel.Stable)!;
+        var development = UpdateChecker.SelectRelease(catalog.RootElement, UpdateChannel.Development)!;
+        Check(stable.DisplayName == "New version: 0.2.0" && development.DisplayName == "Dev build 18", "release channels select stable or the newest published development release and reject drafts and unknown tags");
+        var olderDev = new InstalledVersion(new Version(0, 2, 0, 0), 17, DateTimeOffset.Parse("2026-10-29T04:00:00Z"));
+        var sameDev = olderDev with { BuildNumber = 18, BuiltAt = DateTimeOffset.Parse("2026-10-29T06:00:00Z") };
+        Check(development.IsNewerThan(olderDev) && !development.IsNewerThan(sameDev) && stable.IsNewerThan(olderDev) && !stable.IsNewerThan(sameDev), "version comparison handles dev build numbers and a stable release newer than the installed dev build without reporting older releases");
+        var installedStable = new InstalledVersion(new Version(0, 2, 0, 0), 0, DateTimeOffset.Parse("2026-10-29T05:30:00Z"));
+        var olderStable = stable with { Version = new Version(0, 1, 0) };
+        Check(stable.IsOfferedTo(sameDev, UpdateChannel.Stable) && development.IsOfferedTo(installedStable, UpdateChannel.Development)
+            && (development with { Version = new Version(0, 1, 0), BuildNumber = 12 }).IsOfferedTo(installedStable, UpdateChannel.Development),
+            "after switching channels the selected channel's latest release is offered even when it is not newer");
+        Check(!development.IsOfferedTo(sameDev, UpdateChannel.Development) && !stable.IsOfferedTo(installedStable, UpdateChannel.Development) && !olderStable.IsOfferedTo(installedStable, UpdateChannel.Stable),
+            "the installed release is never offered again and older releases are not offered within the installed channel");
+        using (var checker = new UpdateChecker(new UpdateResponseHandler(request =>
+        {
+            if (request.RequestUri!.Host != "api.github.com" || !request.Headers.UserAgent.Any()) throw new Exception("Update request is missing its API identity");
+            return new(HttpStatusCode.OK) { Content = new StringContent(json) };
+        })))
+            Check(checker.CheckAsync(UpdateChannel.Development, CancellationToken.None).GetAwaiter().GetResult()!.BuildNumber == 18, "update HTTP client parses a simulated GitHub response without real network access");
+        using (var checker = new UpdateChecker(new UpdateResponseHandler(_ => new(HttpStatusCode.Forbidden))))
+        {
+            try { checker.CheckAsync(UpdateChannel.Stable, CancellationToken.None).GetAwaiter().GetResult(); throw new Exception("Failed HTTP request accepted"); }
+            catch (HttpRequestException) { Check(true, "HTTP errors are not reported as an up-to-date success"); }
+        }
+        var automatic = Field<CheckBox>(window, "automaticUpdates");
+        Check(automatic.IsChecked == true && UpdateSettings.Load().Channel == UpdateChannel.Stable && Field<DispatcherTimer>(window, "updateTimer").Interval == TimeSpan.FromMinutes(5), "update checks default to automatic stable checks at five-minute intervals");
+        automatic.IsChecked = false; automatic.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Check(!UpdateSettings.Load().Automatic && !Field<DispatcherTimer>(window, "updateTimer").IsEnabled, "automatic checks can be disabled and the choice is persisted");
+        Invoke(window, "SelectUpdateChannel", UpdateChannel.Development); SettleTransitions();
+        Check(UpdateSettings.Load().Channel == UpdateChannel.Development && Field<TranslateTransform>(window, "updateChannelIndicator").X > 0, "the update channel selector slides and persists independently of automatic checking");
+        var checkField = typeof(MainWindow).GetField("checkUpdateRelease", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((_, _) => Task.FromResult<UpdateRelease?>(stable)));
+        ((Task)Invoke(window, "CheckUpdatesAsync", true)!).GetAwaiter().GetResult();
+        var badge = Field<Border>(window, "newVersionBadge");
+        Check(badge.Visibility == Visibility.Visible && Field<TextBlock>(window, "updatePopupTitle").Text == "New version: 0.2.0" && !Field<Popup>(window, "updatePopup").IsOpen, "manual checking works with automatic checks off and shows a badge without opening a window");
+        var footer = Field<Border>(window, "versionHoverArea"); footer.UpdateLayout();
+        var versionRow = (StackPanel)footer.Child;
+        Check(versionRow.HorizontalAlignment == HorizontalAlignment.Center && footer.HorizontalAlignment == HorizontalAlignment.Center && footer.Padding.Left > 0, "the version and New badge stay centered together inside a larger hover target");
+        var rowBitmap = new RenderTargetBitmap((int)Math.Ceiling(versionRow.ActualWidth * 6), (int)Math.Ceiling(versionRow.ActualHeight * 6), 576, 576, PixelFormats.Pbgra32);
+        var rowVisual = new DrawingVisual();
+        using (var context = rowVisual.RenderOpen()) context.DrawRectangle(new VisualBrush(versionRow), null, new Rect(0, 0, versionRow.ActualWidth, versionRow.ActualHeight));
+        rowBitmap.Render(rowVisual);
+        int rowWidth = rowBitmap.PixelWidth, rowHeight = rowBitmap.PixelHeight; var rowPixels = new byte[rowWidth * rowHeight * 4]; rowBitmap.CopyPixels(rowPixels, rowWidth * 4, 0);
+        int badgeStart = (int)(((FrameworkElement)versionRow.Children[0]).ActualWidth * 6) + 3, versionTop = rowHeight, versionBottom = 0, newTop = rowHeight, newBottom = 0;
+        for (int y = 0; y < rowHeight; y++)
+            for (int x = 0; x < rowWidth; x++)
+            {
+                int i = (y * rowWidth + x) * 4;
+                // Version ink is grey on transparent; the badge text is white on the accent fill.
+                if (x < badgeStart && rowPixels[i + 3] > 128) { versionTop = Math.Min(versionTop, y); versionBottom = Math.Max(versionBottom, y); }
+                if (x >= badgeStart && rowPixels[i + 3] == 255 && rowPixels[i + 1] > 200) { newTop = Math.Min(newTop, y); newBottom = Math.Max(newBottom, y); }
+            }
+        Check(Math.Abs((versionTop + versionBottom) - (newTop + newBottom)) / 12d <= .75, "the version text and New badge text share one visual center line");
+        var popupField = typeof(MainWindow).GetField("updatePopup", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var originalPopup = Field<Popup>(window, "updatePopup");
+        var popupContent = (FrameworkElement)originalPopup.Child;
+        originalPopup.Child = null;
+        var hoverPopup = new OffscreenPopup { Child = popupContent, Resources = window.Resources };
+        popupField.SetValue(window, hoverPopup);
+        try
+        {
+            Invoke(window, "SetAvailableUpdate", (object)null!);
+            footer.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
+            Check(!hoverPopup.OpenRequested && !StyleTransitions.GetDropDownOpen(hoverPopup) && badge.Visibility == Visibility.Collapsed, "hovering without a detected update never opens the version popup");
+            Invoke(window, "SetAvailableUpdate", stable);
+            footer.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
+            Check(hoverPopup.OpenRequested && popupContent.Opacity == 0, "hovering with a detected update opens the popup starting from transparent");
+            SettleTransitions(45);
+            Check(popupContent.Opacity is > 0 and < 1, "the update popup has intermediate fade-in frames");
+            SettleTransitions(100);
+            Check(popupContent.Opacity == 1 && hoverPopup.IsHitTestVisible, "the update popup settles fully visible and accepts pointer input");
+            footer.UpdateLayout();
+            var footerGrid = (FrameworkElement)footer.Parent;
+            Check(footer.Padding == new Thickness(14) && footer.Margin.Bottom == 0, "all four sides share the expanded bottom hover distance without moving the version text");
+            foreach (double width in new[] { 158d, 174d, 220d })
+            {
+                var position = originalPopup.CustomPopupPlacementCallback(new Size(width, 108), footer.RenderSize, new Point()).Single().Point;
+                Check(originalPopup.Placement == PlacementMode.Custom && originalPopup.PlacementTarget == footer && Math.Abs(position.X + width / 2 - footer.ActualWidth / 2) < .001 && position.Y == -108 && Math.Abs(footer.TranslatePoint(new Point(footer.ActualWidth / 2, 0), footerGrid).X - footerGrid.ActualWidth / 2) < 1, "the popup stays above and centered on the sidebar for width " + width);
+            }
+            Invoke(window, "SetAvailableUpdate", development);
+            Check(hoverPopup.OpenRequested && Field<TextBlock>(window, "updatePopupTitle").Text == "Dev build 18", "an open popup refreshes to the development build title without closing");
+            Invoke(window, "SetAvailableUpdate", stable);
+            popupContent.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            RenderElement(popupContent, "version-hover-update", (int)Math.Ceiling(popupContent.DesiredSize.Width), (int)Math.Ceiling(popupContent.DesiredSize.Height));
+            footer.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseLeaveEvent });
+            SettleTransitions(185);
+            Check(hoverPopup.OpenRequested && popupContent.Opacity is > 0 and < 1 && !hoverPopup.IsHitTestVisible, "leaving starts a visible fade-out after the hover grace period");
+            popupContent.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
+            SettleTransitions();
+            Check(StyleTransitions.GetDropDownOpen(hoverPopup) && hoverPopup.OpenRequested && popupContent.Opacity == 1 && hoverPopup.IsHitTestVisible, "entering the popup cancels its unfinished fade-out and keeps it usable");
+            Invoke(window, "CloseUpdatePopup"); SettleTransitions();
+            Check(!hoverPopup.OpenRequested, "the popup closes only after fading out");
+            Invoke(window, "SetAvailableUpdate", (object)null!);
+            footer.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
+            Check(!hoverPopup.OpenRequested && !StyleTransitions.GetDropDownOpen(hoverPopup), "clearing an update restores the no-popup hover behavior");
+            Invoke(window, "SetAvailableUpdate", stable);
+        }
+        finally { hoverPopup.Child = null; originalPopup.Child = popupContent; popupField.SetValue(window, originalPopup); Field<DispatcherTimer>(window, "updateHoverTimer").Stop(); }
+        VerifyUpdateInstallation(window, stable);
+        checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((_, _) => Task.FromException<UpdateRelease?>(new HttpRequestException("simulated failure"))));
+        ((Task)Invoke(window, "CheckUpdatesAsync", true)!).GetAwaiter().GetResult();
+        Check(Field<TextBlock>(window, "updateCheckStatus").Text == UiLanguage.Current["检查更新失败"] && Field<Button>(window, "checkUpdatesButton").IsEnabled, "manual update failures show a short error and release the check button");
+        var checksStarted = typeof(MainWindow).GetField("updateChecksStarted", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var crossChannel = development with { Version = new Version(0, 0, 1), BuildNumber = 12 };
+        var checkedChannels = new List<UpdateChannel>();
+        checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((channel, _) =>
+        {
+            checkedChannels.Add(channel);
+            return Task.FromResult<UpdateRelease?>(channel == UpdateChannel.Development ? crossChannel : null);
+        }));
+        checksStarted.SetValue(window, true);
+        Invoke(window, "SelectUpdateChannel", UpdateChannel.Stable);
+        Check(badge.Visibility == Visibility.Collapsed && checkedChannels.SequenceEqual([UpdateChannel.Stable]), "switching channels clears the previous channel's update badge and checks the new channel at once with automatic checks off");
+        Invoke(window, "SelectUpdateChannel", UpdateChannel.Development); SettleTransitions();
+        Check(badge.Visibility == Visibility.Visible && Field<TextBlock>(window, "updatePopupTitle").Text == "Dev build 12", "switching to the development channel immediately offers its latest build even with an older base version");
+        Invoke(window, "SelectUpdateChannel", UpdateChannel.Stable); SettleTransitions();
+        checksStarted.SetValue(window, false);
+        var aboutButtons = (StackPanel)Field<Button>(window, "checkUpdatesButton").Parent;
+        Check(aboutButtons.Children[^2] == Field<Button>(window, "checkUpdatesButton") && aboutButtons.Children[^1] == Field<TextBlock>(window, "updateCheckStatus")
+            && ((ScrollViewer)Field<Dictionary<string, FrameworkElement>>(window, "pages")["ABOUT"]).IsAncestorOf(aboutButtons), "the update check button ends the About page button row with its result beside it");
+        automatic.IsChecked = true; automatic.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Invoke(window, "SetAvailableUpdate", (object)null!); Invoke(window, "SetUpdateCheckStatus", (object)null!);
+        checkField.SetValue(window, null);
+        Render(window, "settings-updates", 1240, 800);
+    }
+
+    private static void VerifyUpdateInstallation(MainWindow window, UpdateRelease stable)
+    {
+        var download = Path.Combine(AppPaths.DataDirectory, "download-check.zip");
+        long reported = 0;
+        using (var checker = new UpdateChecker(new UpdateResponseHandler(request =>
+        {
+            if (request.RequestUri != stable.Package || request.Headers.Accept.Single().MediaType != "application/octet-stream") throw new Exception("Update download does not request the binary asset");
+            return new(HttpStatusCode.OK) { Content = new ByteArrayContent("zip"u8.ToArray()) };
+        })))
+        {
+            checker.DownloadAsync(stable, download, bytes => reported = bytes, CancellationToken.None).GetAwaiter().GetResult();
+            Check(File.ReadAllText(download) == "zip" && reported == 3, "the release asset downloads with progress and passes size and SHA-256 verification");
+            try { checker.DownloadAsync(stable with { PackageSha256 = new string('0', 64) }, download, _ => { }, CancellationToken.None).GetAwaiter().GetResult(); throw new Exception("Corrupt update package accepted"); }
+            catch (InvalidDataException) { Check(true, "a package whose SHA-256 differs from the release digest is rejected"); }
+        }
+        File.Delete(download);
+
+        var app = Path.Combine(AppPaths.DataDirectory, "update-app");
+        if (Directory.Exists(app)) Directory.Delete(app, true);
+        string[] applicationFiles = ["Questyle.exe", "runtime/Questyle.dll", "language/en-US.json"];
+        void Write(string relative, string text) { var path = Path.Combine(app, relative); Directory.CreateDirectory(Path.GetDirectoryName(path)!); File.WriteAllText(path, text); }
+        bool AllRead(string text) => applicationFiles.All(file => File.ReadAllText(Path.Combine(app, file)) == text);
+        foreach (var file in applicationFiles) Write(file, "new");
+        Write("data/settings.json", "user"); Write("eq-config/headphone.json", "user"); Write("paired-headphones.json", "user");
+        UpdateInstaller.ResetWorkspace();
+        Check(UpdateInstaller.MeasureInstallation(app) == 9, "the simulated download size counts only application files");
+        UpdateInstaller.CreatePackage(app, UpdateInstaller.PackagePath, CancellationToken.None);
+        using (var zip = System.IO.Compression.ZipFile.OpenRead(UpdateInstaller.PackagePath))
+            Check(zip.Entries.Select(entry => entry.FullName).ToHashSet().SetEquals(applicationFiles.Select(file => "questyle-windows-x64/" + file)), "the simulated package uses the release ZIP layout without user data");
+        foreach (var file in applicationFiles) Write(file, "previous");
+        var root = UpdateInstaller.Extract(UpdateInstaller.PackagePath);
+        using (File.Open(Path.Combine(app, "runtime", "Questyle.dll"), FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            try { UpdateInstaller.Install(root, app); throw new Exception("Locked installation accepted"); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Check(AllRead("previous") && applicationFiles.All(file => File.Exists(Path.Combine(root, file))), "an entry that cannot be replaced restores the entries already replaced"); }
+        }
+        var installation = UpdateInstaller.Install(root, app);
+        Check(AllRead("new") && File.ReadAllText(Path.Combine(app, "data", "settings.json")) == "user" && File.ReadAllText(Path.Combine(app, "paired-headphones.json")) == "user" && File.Exists(Path.Combine(app, "eq-config", "headphone.json")), "installation replaces application entries and keeps user data in place");
+        installation.Rollback();
+        Check(AllRead("previous"), "a failed handoff restores the previous application files");
+        UpdateInstaller.DeleteWorkspace(); Directory.Delete(app, true);
+        Render(window, "update-assets-loaded", 1240, 800);
+        var heldAssets = Directory.EnumerateFiles(Path.Combine(AppContext.BaseDirectory, "assets"), "*", SearchOption.AllDirectories).Where(file =>
+        {
+            // DELETE access fails while another handle lacks FILE_SHARE_DELETE, which would also block moving the folder.
+            var handle = CreateFileW(file, 0x00010000, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+            if (handle == new IntPtr(-1)) return true;
+            CloseHandle(handle); return false;
+        }).ToArray();
+        Check(heldAssets.Length == 0, "the running window keeps no image asset open, so an update can move the program folder: " + string.Join(", ", heldAssets.Select(Path.GetFileName)));
+
+        var formatSize = typeof(MainWindow).GetMethod("FormatSize", BindingFlags.NonPublic | BindingFlags.Static)!;
+        Check(formatSize.Invoke(null, [1536L])!.Equals(("1.50", "KB")) && formatSize.Invoke(null, [69_206_016L])!.Equals(("66.00", "MB")) && formatSize.Invoke(null, [2_147_483_648L])!.Equals(("2.00", "GB")), "sizes use two decimals with KB, MB or GB");
+        object SetSize(string field, string number, string unit) { var text = typeof(MainWindow).GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!; text.GetType().GetMethod("Set")!.Invoke(text, [number, unit]); return text; }
+        double Width(string number, string unit) { var text = SetSize("updateReceived", number, unit); return (double)text.GetType().GetProperty("ContentWidth")!.GetValue(text)!; }
+        Check(new[] { Width("1.11", "KB"), Width("8.88", "MB"), Width("0.00", "GB") }.Distinct().Count() == 1, "download sizes keep fixed glyph cells for every digit and unit");
+
+        // Offscreen preview of the update window while downloading.
+        var card = Field<Border>(window, "updateCard"); var layer = (Canvas)card.Parent;
+        Field<TextBlock>(window, "updateTitle").Text = UiLanguage.Current.Format("正在下载: {0}", stable.Label);
+        SetSize("updateReceived", "37.42", "MB"); SetSize("updateTotal", "66.00", "MB");
+        Field<Border>(window, "updateFill").Width = 316 * 37.42 / 66;
+        layer.Children.Remove(card);
+        var preview = new Border { Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#181B24")), Child = card };
+        preview.SetValue(TextElement.FontFamilyProperty, window.FontFamily);
+        try { RenderElement(preview, "update-window", 380, 160); }
+        finally { preview.Child = null; layer.Children.Add(card); }
+
+        Field<List<Button>>(window, "nav")[2].RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        var developer = Field<Border>(window, "developerCard");
+        for (int i = 0; i < 7; i++) Invoke(window, "CountBrandClick");
+        Check(developer.Visibility == Visibility.Collapsed, "developer options stay hidden before the eighth title click");
+        Invoke(window, "CountBrandClick");
+        Check(developer.Visibility == Visibility.Visible, "eight quick sidebar title clicks on the settings page reveal developer options");
+        Invoke(window, "SimulateUpdate");
+        var simulated = Field<UpdateRelease>(window, "availableUpdate");
+        Check(simulated.Simulated && simulated.IsNewerThan(InstalledVersion.Current) && Field<Border>(window, "newVersionBadge").Visibility == Visibility.Visible, "the simulated update is offered as a newer release of the selected channel");
+        ((Task)Invoke(window, "CheckUpdatesAsync", true)!).GetAwaiter().GetResult();
+        Check(ReferenceEquals(Field<UpdateRelease>(window, "availableUpdate"), simulated), "update checks do not replace a pending simulated update");
+        developer.Visibility = Visibility.Collapsed; Invoke(window, "SetAvailableUpdate", stable);
+    }
+
     private static void VerifySettingsAlignment(MainWindow window)
     {
         var page = Field<Dictionary<string, FrameworkElement>>(window, "pages")["SETTINGS"];
@@ -1392,6 +1661,9 @@ static class Program
             foreach (var descendant in Descendants<T>(child)) yield return descendant;
         }
     }
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
     private static void RenderElement(FrameworkElement element, string name, int width, int height)
     {
         element.Measure(new Size(width, height)); element.Arrange(new Rect(0, 0, width, height)); element.UpdateLayout();
@@ -1467,5 +1739,11 @@ sealed class AudioStateTransport(DongleSnapshot state) : IQuestyleTransport
 
 sealed class OffscreenPopup : Popup
 {
-    static OffscreenPopup() => IsOpenProperty.OverrideMetadata(typeof(OffscreenPopup), new FrameworkPropertyMetadata(false, null, (target, value) => false));
+    public bool OpenRequested { get; private set; }
+    static OffscreenPopup() => IsOpenProperty.OverrideMetadata(typeof(OffscreenPopup), new FrameworkPropertyMetadata(false, null, (target, value) => { ((OffscreenPopup)target).OpenRequested = (bool)value; return false; }));
+}
+
+sealed class UpdateResponseHandler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(response(request));
 }

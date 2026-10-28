@@ -314,14 +314,12 @@ static class Program
             Check(exportOverlay.Visibility == Visibility.Visible && !Field<Grid>(window, "Root").IsEnabled && new[] { "Equalizer APO", "Wavelet", "EasyEffects" }.All(name => Descendants<Button>(exportOverlay).Any(button => Equals(button.Content, name))), "export opens a modal overlay with all three target formats");
             var dialogRoot = Field<Grid>(window, "Root");
             Check(exportOverlay.Opacity == 0 && dialogRoot.Effect is BlurEffect { Radius: 0 }, "export starts transparent with an unblurred background");
-            SettleTransitions(55);
-            Check(exportOverlay.Opacity > 0 && exportOverlay.Opacity < 1 && dialogRoot.Effect is BlurEffect { Radius: > 0 and < 10 }, "export and its backdrop fade while the background gradually blurs");
-            SettleTransitions();
+            Check(ObserveTransition(400, () => exportOverlay.Opacity > 0 && exportOverlay.Opacity < 1 && dialogRoot.Effect is BlurEffect { Radius: > 0 and < 10 }), "export and its backdrop fade while the background gradually blurs");
+            SettleTransitions(245);
             Check(exportOverlay.Opacity == 1 && dialogRoot.Effect is BlurEffect { Radius: 10 }, "export reaches full opacity and the existing blur strength");
             Invoke(window, "DismissPeqExport");
             Check(!exportOverlay.IsEnabled && !exportOverlay.IsHitTestVisible && exportOverlay.Visibility == Visibility.Visible && !dialogRoot.IsEnabled, "closing export immediately blocks dialog input and keeps the page modal during the fade");
-            SettleTransitions(55);
-            Check(exportOverlay.Opacity > 0 && exportOverlay.Opacity < 1 && dialogRoot.Effect is BlurEffect { Radius: > 0 and < 10 }, "closing export fades out and gradually clears the background");
+            Check(ObserveTransition(400, () => exportOverlay.Opacity > 0 && exportOverlay.Opacity < 1 && dialogRoot.Effect is BlurEffect { Radius: > 0 and < 10 }), "closing export fades out and gradually clears the background");
             double closingOpacity = exportOverlay.Opacity;
             double closingBlur = ((BlurEffect)dialogRoot.Effect).Radius;
             Invoke(window, "ShowPeqExport");
@@ -403,11 +401,10 @@ static class Program
             typeof(MainWindow).GetField("peqHoverPosition", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, new Point((double)Invoke(window, "PeqX", 1000d)!, 50));
             Invoke(window, "UpdatePeqHover");
             Check((double)fadingAxisLabel.GetAnimationBaseValue(UIElement.OpacityProperty) == 0 && fadingAxisLabel.Opacity > 0, "the frequency label under the pointer tag starts fading instead of disappearing immediately");
-            SettleTransitions(45);
-            Check(fadingAxisLabel.Opacity is > 0 and < 1, "covered axis text passes through an intermediate opacity");
+            Check(ObserveTransition(300, () => fadingAxisLabel.Opacity is > 0 and < 1), "covered axis text passes through an intermediate opacity");
             double axisOpacityBeforeRepeat = fadingAxisLabel.Opacity; Invoke(window, "UpdatePeqHover");
             Check(fadingAxisLabel.Opacity <= axisOpacityBeforeRepeat + .001, "repeated hover updates do not restart the axis label fade");
-            SettleTransitions(160);
+            SettleTransitions(205);
             typeof(MainWindow).GetField("peqHoverPosition", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, null); Invoke(window, "UpdatePeqHover");
             Check((double)fadingAxisLabel.GetAnimationBaseValue(UIElement.OpacityProperty) == 1 && fadingAxisLabel.Opacity < 1, "moving the tag away restores the axis label with a fade-in");
             SettleTransitions(190);
@@ -564,9 +561,8 @@ static class Program
             Check(Field<TextBlock>(window, "peqWarning").Visibility == Visibility.Visible && warning.FontSize == Field<Button>(window, "peqAdd").FontSize && warning.Opacity == 1, "clipping warning reaches full opacity and uses the same text size as action buttons");
             Invoke(window, "SetPeq", peqDefinition with { Preamp = -7 });
             Check(warning.Visibility == Visibility.Visible && warning.Opacity > 0, "clipping warning remains visible while its fade-out starts");
-            SettleTransitions(45);
-            Check(warning.Opacity is > 0 and < 1, "clipping warning fades through an intermediate opacity");
-            SettleTransitions(160);
+            Check(ObserveTransition(300, () => warning.Opacity is > 0 and < 1), "clipping warning fades through an intermediate opacity");
+            SettleTransitions(205);
             Check(Field<TextBlock>(window, "peqWarning").Visibility == Visibility.Collapsed, "adequate attenuation hides the clipping warning");
             typeof(MainWindow).GetField("peqEndpoint", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, new PeqEndpoint("{00000000-0000-0000-0000-000000000000}", "test", true));
             var preampBox = Field<TextBox>(window, "peqPreamp");
@@ -590,9 +586,9 @@ static class Program
             var modeIndicator = (Border)((Grid)modeSelector.Child).Children[0];
             Check(modeIndicator.Effect is DropShadowEffect { BlurRadius: 4, ShadowDepth: 1, Opacity: .12 } && modeButtons.All(button => button.FontSize == plainButton.FontSize), "mode indicator has a faint shadow and its labels match ordinary button text size");
             double modeLeftInset = modeIndicator.TransformToAncestor(modeSelector).TransformBounds(new Rect(modeIndicator.RenderSize)).Left;
-            modeButtons[1].RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); SettleTransitions(80);
-            Check(Field<TranslateTransform>(window, "peqModeIndicator").X > 0 && Field<Border>(window, "peqApplySlot").ActualWidth == 0, "mode indicator moves before the lower action row starts");
-            SettleTransitions(330);
+            modeButtons[1].RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Check(ObserveTransition(300, () => Field<TranslateTransform>(window, "peqModeIndicator").X > 0 && Field<Border>(window, "peqApplySlot").ActualWidth == 0), "mode indicator moves before the lower action row starts");
+            SettleTransitions(410);
             double modeRightInset = modeSelector.ActualWidth - modeIndicator.TransformToAncestor(modeSelector).TransformBounds(new Rect(modeIndicator.RenderSize)).Right;
             Check(Math.Abs(modeLeftInset - modeRightInset) < .01 && Math.Abs(modeLeftInset - 3) < .01, "mode indicator has equal three-DIP insets at both ends under fractional display scaling");
             int beforeManualEdit = livePeqWrites.Count;
@@ -692,11 +688,11 @@ static class Program
             var wheel = new MouseWheelEventArgs(Mouse.PrimaryDevice, 0, -120) { RoutedEvent = Mouse.PreviewMouseWheelEvent };
             table.RaiseEvent(wheel);
             Check(wheel.Handled && table.VerticalOffset == 0, "PEQ wheel begins a pixel animation without an immediate jump");
-            SettleTransitions(20); table.UpdateLayout(); double halfwayOffset = table.VerticalOffset;
-            SettleTransitions(100); table.UpdateLayout(); double finalOffset = table.VerticalOffset;
+            ObserveTransition(200, () => { table.UpdateLayout(); return table.VerticalOffset > 0; }); double halfwayOffset = table.VerticalOffset;
+            SettleTransitions(120); table.UpdateLayout(); double finalOffset = table.VerticalOffset;
             Check(halfwayOffset > 0 && halfwayOffset < finalOffset && finalOffset > 0, $"PEQ wheel moves through intermediate offsets and settles promptly ({halfwayOffset}, {finalOffset})");
             table.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, 0, -120) { RoutedEvent = Mouse.PreviewMouseWheelEvent });
-            SettleTransitions(35); table.UpdateLayout(); double turnOffset = table.VerticalOffset;
+            SampleTransition(35); table.UpdateLayout(); double turnOffset = table.VerticalOffset;
             table.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, 0, 120) { RoutedEvent = Mouse.PreviewMouseWheelEvent });
             SettleTransitions(150); table.UpdateLayout();
             Check(table.VerticalOffset < turnOffset, "reversing the wheel cancels the previous scroll destination");
@@ -761,20 +757,17 @@ static class Program
             var transitionProbe = new Border { Background = Brushes.Red };
             StyleTransitions.SetEnabled(transitionProbe, true);
             transitionProbe.Background = Brushes.Blue;
-            SettleTransitions(55);
-            var intermediate = ((SolidColorBrush)transitionProbe.Background).Color;
-            Check(intermediate != Colors.Red && intermediate != Colors.Blue, "interaction brushes visibly interpolate instead of jumping between states");
-            SettleTransitions();
+            Check(ObserveTransition(400, () => ((SolidColorBrush)transitionProbe.Background).Color is var color && color != Colors.Red && color != Colors.Blue), "interaction brushes visibly interpolate instead of jumping between states");
+            SettleTransitions(245);
             Check(((SolidColorBrush)transitionProbe.Background).Color == Colors.Blue, "interaction transitions finish on the requested style");
 
             var navigationActions = Field<List<Button>>(window, "nav");
             navigationActions[0].RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); SettleTransitions();
             var settingsNav = navigationActions[2];
             var settingsSurface = (Border)settingsNav.Template.FindName("NavigationSurface", settingsNav);
-            settingsNav.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); SettleTransitions(55);
-            var selectionMiddle = ((SolidColorBrush)settingsSurface.Background).Color;
-            Check(selectionMiddle.A is > 0 and < 255 && selectionMiddle.R == 52 && selectionMiddle.G == 55 && selectionMiddle.B == 64, "sidebar selection fades through neutral grey without a white or pink flash");
-            SettleTransitions();
+            settingsNav.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Check(ObserveTransition(300, () => ((SolidColorBrush)settingsSurface.Background).Color is { A: > 0 and < 255, R: 52, G: 55, B: 64 }), "sidebar selection fades through neutral grey without a white or pink flash");
+            SettleTransitions(245);
             SetControlState(settingsNav, typeof(UIElement), "IsMouseOverPropertyKey", true);
             SetControlState(settingsNav, typeof(ButtonBase), "IsPressedPropertyKey", true); SettleTransitions();
             settingsNav.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
@@ -788,10 +781,8 @@ static class Program
             SetControlState(settingsNav, typeof(ButtonBase), "IsPressedPropertyKey", false);
             settingsNav.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
             Check(((SolidColorBrush)settingsSurface.Background).Color == heldNavigationColor, "releasing a held unselected sidebar button preserves the displayed color before selection animates");
-            SettleTransitions(55);
-            var heldSelectionMiddle = ((SolidColorBrush)settingsSurface.Background).Color;
-            Check(heldSelectionMiddle.R is > 59 and < 69 && heldSelectionMiddle.G is > 63 and < 74 && heldSelectionMiddle.B is > 73 and < 86, "selection after a long press interpolates from pressed to selected hover without a flash");
-            SettleTransitions();
+            Check(ObserveTransition(300, () => ((SolidColorBrush)settingsSurface.Background).Color is { R: > 59 and < 69, G: > 63 and < 74, B: > 73 and < 86 }), "selection after a long press interpolates from pressed to selected hover without a flash");
+            SettleTransitions(245);
             SetControlState(settingsNav, typeof(UIElement), "IsMouseOverPropertyKey", false); SettleTransitions();
             Render(window, "sidebar-selection", 1240, 800);
             navigationActions[0].RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); SettleTransitions(115);
@@ -1010,9 +1001,8 @@ static class Program
             var overlay = (Grid)window.FindName("SearchOverlay");
             Check(overlay.Visibility == Visibility.Visible && root.Effect is BlurEffect && Field<ListBox>(window, "searchResults").Items.Count == 1, "search popup blurs the app and updates live results without duplicates");
             Check(overlay.Opacity == 0 && root.Effect is BlurEffect { Radius: 0 }, "search starts transparent without an instant background blur");
-            SettleTransitions(55);
-            Check(overlay.Opacity > 0 && overlay.Opacity < 1 && root.Effect is BlurEffect { Radius: > 0 and < 10 }, "search uses the same gradual popup and blur transition as export");
-            SettleTransitions();
+            Check(ObserveTransition(400, () => overlay.Opacity > 0 && overlay.Opacity < 1 && root.Effect is BlurEffect { Radius: > 0 and < 10 }), "search uses the same gradual popup and blur transition as export");
+            SettleTransitions(245);
             Render(window, "device-search", 1240, 800);
             var allViewports = Descendants<ScrollViewer>((DependencyObject)window.Content).ToArray();
             Check(allViewports.Length > 5 && allViewports.All(viewport => SmoothScrolling.GetEnabled(viewport) && (viewport == table || viewport.TemplatedParent is TextBox || !viewport.CanContentScroll)) && VirtualizingPanel.GetScrollUnit(Field<ItemsControl>(window, "peqRows")) == ScrollUnit.Pixel, "all lists and pages use smooth pixel scrolling; the virtual PEQ list and text hosts retain their native scroll contracts");
@@ -1394,10 +1384,9 @@ static class Program
         }
         Check(true, "bounded numeric adjustments show their matching range hint and clamp to their lower limit");
         Invoke(window, "SetPeqInputValue", preamp, "Preamp", 11d);
-        SettleTransitions(65);
+        Check(ObserveTransition(400, () => Field<Adorner>(window, "peqRangeHint") is { Opacity: > 0 and < 1, IsHitTestVisible: false }), "range hint fades in without intercepting pointer input");
         var hint = Field<Adorner>(window, "peqRangeHint");
-        Check(hint.Opacity is > 0 and < 1 && !hint.IsHitTestVisible, "range hint fades in without intercepting pointer input");
-        SettleTransitions(120);
+        SettleTransitions(185);
         Render(window, "peq-preamp-range-hint", 1240, 800);
         var rangeLabel = Descendants<Border>(hint).Single();
         Check(rangeLabel.TransformToAncestor(hint).TransformBounds(new Rect(rangeLabel.RenderSize)).Bottom < 0 && Descendants<TextBlock>(hint).Single().Text.Contains("-20") && Descendants<TextBlock>(hint).Single().Text.Contains("10"), "range hint sits above the input and displays its actual minimum and maximum");
@@ -1415,22 +1404,23 @@ static class Program
         };
         var json = JsonSerializer.Serialize(new[]
         {
-            Release("dev-build-18", true, "2026-10-29T06:00:00Z", "App-Version: 0.2.0"),
+            Release("dev-build-1a2b3c4d", true, "2026-10-29T06:00:00Z", "App-Version: 0.2.0"),
             Release("v0.2.0", false, "2026-10-29T05:00:00Z"),
             Release("v9.0.0", false, "2026-10-29T07:00:00Z", draft: true),
+            Release("dev-build-77", true, "2026-10-29T09:00:00Z", "App-Version: 0.2.0"),
             Release("unrecognized", true, "2026-10-29T08:00:00Z")
         });
         using var catalog = JsonDocument.Parse(json);
         var stable = UpdateChecker.SelectRelease(catalog.RootElement, UpdateChannel.Stable)!;
         var development = UpdateChecker.SelectRelease(catalog.RootElement, UpdateChannel.Development)!;
-        Check(stable.DisplayName == "New version: 0.2.0" && development.DisplayName == "Dev build 18", "release channels select stable or the newest published development release and reject drafts and unknown tags");
-        var olderDev = new InstalledVersion(new Version(0, 2, 0, 0), 17, DateTimeOffset.Parse("2026-10-29T04:00:00Z"));
-        var sameDev = olderDev with { BuildNumber = 18, BuiltAt = DateTimeOffset.Parse("2026-10-29T06:00:00Z") };
+        Check(stable.DisplayName == "New version: 0.2.0" && development.DisplayName == "Dev build 1a2b3c4d", "release channels select stable or the newest published commit-identified development release and reject drafts, numbered and unknown tags");
+        var olderDev = new InstalledVersion(new Version(0, 2, 0, 0), "0f0f0f0f", DateTimeOffset.Parse("2026-10-29T04:00:00Z"));
+        var sameDev = olderDev with { BuildCommit = "1a2b3c4d", BuiltAt = DateTimeOffset.Parse("2026-10-29T06:00:00Z") };
         Check(development.IsNewerThan(olderDev) && !development.IsNewerThan(sameDev) && stable.IsNewerThan(olderDev) && !stable.IsNewerThan(sameDev), "version comparison handles dev build numbers and a stable release newer than the installed dev build without reporting older releases");
-        var installedStable = new InstalledVersion(new Version(0, 2, 0, 0), 0, DateTimeOffset.Parse("2026-10-29T05:30:00Z"));
+        var installedStable = new InstalledVersion(new Version(0, 2, 0, 0), "", DateTimeOffset.Parse("2026-10-29T05:30:00Z"));
         var olderStable = stable with { Version = new Version(0, 1, 0) };
         Check(stable.IsOfferedTo(sameDev, UpdateChannel.Stable) && development.IsOfferedTo(installedStable, UpdateChannel.Development)
-            && (development with { Version = new Version(0, 1, 0), BuildNumber = 12 }).IsOfferedTo(installedStable, UpdateChannel.Development),
+            && (development with { Version = new Version(0, 1, 0), BuildCommit = "0c0c0c0c" }).IsOfferedTo(installedStable, UpdateChannel.Development),
             "after switching channels the selected channel's latest release is offered even when it is not newer");
         Check(!development.IsOfferedTo(sameDev, UpdateChannel.Development) && !stable.IsOfferedTo(installedStable, UpdateChannel.Development) && !olderStable.IsOfferedTo(installedStable, UpdateChannel.Stable),
             "the installed release is never offered again and older releases are not offered within the installed channel");
@@ -1439,7 +1429,7 @@ static class Program
             if (request.RequestUri!.Host != "api.github.com" || !request.Headers.UserAgent.Any()) throw new Exception("Update request is missing its API identity");
             return new(HttpStatusCode.OK) { Content = new StringContent(json) };
         })))
-            Check(checker.CheckAsync(UpdateChannel.Development, CancellationToken.None).GetAwaiter().GetResult()!.BuildNumber == 18, "update HTTP client parses a simulated GitHub response without real network access");
+            Check(checker.CheckAsync(UpdateChannel.Development, CancellationToken.None).GetAwaiter().GetResult()!.BuildCommit == "1a2b3c4d", "update HTTP client parses a simulated GitHub response without real network access");
         using (var checker = new UpdateChecker(new UpdateResponseHandler(_ => new(HttpStatusCode.Forbidden))))
         {
             try { checker.CheckAsync(UpdateChannel.Stable, CancellationToken.None).GetAwaiter().GetResult(); throw new Exception("Failed HTTP request accepted"); }
@@ -1488,9 +1478,8 @@ static class Program
             Invoke(window, "SetAvailableUpdate", stable);
             footer.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
             Check(hoverPopup.OpenRequested && popupContent.Opacity == 0, "hovering with a detected update opens the popup starting from transparent");
-            SettleTransitions(45);
-            Check(popupContent.Opacity is > 0 and < 1, "the update popup has intermediate fade-in frames");
-            SettleTransitions(100);
+            Check(ObserveTransition(300, () => popupContent.Opacity is > 0 and < 1), "the update popup has intermediate fade-in frames");
+            SettleTransitions(145);
             Check(popupContent.Opacity == 1 && hoverPopup.IsHitTestVisible, "the update popup settles fully visible and accepts pointer input");
             footer.UpdateLayout();
             var footerGrid = (FrameworkElement)footer.Parent;
@@ -1501,13 +1490,12 @@ static class Program
                 Check(originalPopup.Placement == PlacementMode.Custom && originalPopup.PlacementTarget == footer && Math.Abs(position.X + width / 2 - footer.ActualWidth / 2) < .001 && position.Y == -108 && Math.Abs(footer.TranslatePoint(new Point(footer.ActualWidth / 2, 0), footerGrid).X - footerGrid.ActualWidth / 2) < 1, "the popup stays above and centered on the sidebar for width " + width);
             }
             Invoke(window, "SetAvailableUpdate", development);
-            Check(hoverPopup.OpenRequested && Field<TextBlock>(window, "updatePopupTitle").Text == "Dev build 18", "an open popup refreshes to the development build title without closing");
+            Check(hoverPopup.OpenRequested && Field<TextBlock>(window, "updatePopupTitle").Text == "Dev build 1a2b3c4d", "an open popup refreshes to the development build title without closing");
             Invoke(window, "SetAvailableUpdate", stable);
             popupContent.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             RenderElement(popupContent, "version-hover-update", (int)Math.Ceiling(popupContent.DesiredSize.Width), (int)Math.Ceiling(popupContent.DesiredSize.Height));
             footer.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseLeaveEvent });
-            SettleTransitions(185);
-            Check(hoverPopup.OpenRequested && popupContent.Opacity is > 0 and < 1 && !hoverPopup.IsHitTestVisible, "leaving starts a visible fade-out after the hover grace period");
+            Check(ObserveTransition(500, () => hoverPopup.OpenRequested && popupContent.Opacity is > 0 and < 1 && !hoverPopup.IsHitTestVisible), "leaving starts a visible fade-out after the hover grace period");
             popupContent.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
             SettleTransitions();
             Check(StyleTransitions.GetDropDownOpen(hoverPopup) && hoverPopup.OpenRequested && popupContent.Opacity == 1 && hoverPopup.IsHitTestVisible, "entering the popup cancels its unfinished fade-out and keeps it usable");
@@ -1527,7 +1515,7 @@ static class Program
         // CI development builds carry a build number, so the installed channel depends on how this test was built.
         var installedChannel = InstalledVersion.Current.Channel;
         var otherChannel = installedChannel == UpdateChannel.Stable ? UpdateChannel.Development : UpdateChannel.Stable;
-        var crossChannel = otherChannel == UpdateChannel.Development ? development with { Version = new Version(0, 0, 1), BuildNumber = 12 } : stable with { Version = new Version(0, 0, 1) };
+        var crossChannel = otherChannel == UpdateChannel.Development ? development with { Version = new Version(0, 0, 1), BuildCommit = "0c0c0c0c" } : stable with { Version = new Version(0, 0, 1) };
         var checkedChannels = new List<UpdateChannel>();
         checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((channel, _) =>
         {
@@ -1651,6 +1639,31 @@ static class Program
             throw new Exception("Settings control rows do not share their left and right edges: " + UiLanguage.Current.Code);
     }
 
+    // For checks that a transition passes through intermediate states: every rendered frame within
+    // the window is inspected, so irregular frame timing can neither skip past nor precede the state.
+    // Stops on the first matching frame, leaving the transition in that intermediate state.
+    private static bool ObserveTransition(int milliseconds, Func<bool> intermediate)
+    {
+        bool seen = false; var frame = new DispatcherFrame(); var clock = Stopwatch.StartNew();
+        void Rendered(object? sender, EventArgs e)
+        {
+            seen = intermediate();
+            if (seen || clock.ElapsedMilliseconds >= milliseconds) { CompositionTarget.Rendering -= Rendered; frame.Continue = false; }
+        }
+        CompositionTarget.Rendering += Rendered; Dispatcher.PushFrame(frame);
+        return seen;
+    }
+
+    // Reads the values as of the moment the wait ends.
+    private static void SampleTransition(int milliseconds)
+    {
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(milliseconds) };
+        timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+        timer.Start(); Dispatcher.PushFrame(frame);
+    }
+
+    // For checks that a transition has finished.
     private static void SettleTransitions(int milliseconds = 190)
     {
         var frame = new DispatcherFrame();

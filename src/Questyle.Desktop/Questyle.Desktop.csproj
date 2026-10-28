@@ -17,7 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <AssemblyMetadata Include="DevBuildNumber" Value="$(DevBuildNumber)" Condition="'$(DevBuildNumber)' != ''" />
+    <AssemblyMetadata Include="DevBuildCommit" Value="$(DevBuildCommit)" Condition="'$(DevBuildCommit)' != ''" />
     <AssemblyMetadata Include="BuildTimestamp" Value="$(BuildTimestamp)" Condition="'$(BuildTimestamp)' != ''" />
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />

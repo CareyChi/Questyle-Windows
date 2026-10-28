@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
@@ -89,8 +90,8 @@ public partial class MainWindow
         var installed = InstalledVersion.Current; var version = installed.Version;
         updateRequest?.Cancel();
         SetAvailableUpdate(updateSettings.Channel == UpdateChannel.Stable
-            ? new UpdateRelease(new Version(version.Major, version.Minor, version.Build + 1), 0, DateTimeOffset.Now)
-            : new UpdateRelease(new Version(version.Major, version.Minor, version.Build), installed.BuildNumber + 1, DateTimeOffset.Now));
+            ? new UpdateRelease(new Version(version.Major, version.Minor, version.Build + 1), "", DateTimeOffset.Now)
+            : new UpdateRelease(new Version(version.Major, version.Minor, version.Build), Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant(), DateTimeOffset.Now));
     }
 
     private static (string Number, string Unit) FormatSize(long bytes)

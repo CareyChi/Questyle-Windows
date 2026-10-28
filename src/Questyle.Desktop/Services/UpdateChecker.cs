@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 
 namespace Questyle.Desktop.Services;
 
-public sealed record InstalledVersion(Version Version, long BuildNumber, DateTimeOffset BuiltAt)
+public sealed record InstalledVersion(Version Version, string BuildCommit, DateTimeOffset BuiltAt)
 {
     public static InstalledVersion Current
     {
@@ -17,31 +17,32 @@ public sealed record InstalledVersion(Version Version, long BuildNumber, DateTim
             var assembly = typeof(InstalledVersion).Assembly;
             var metadata = assembly.GetCustomAttributes<AssemblyMetadataAttribute>().ToDictionary(value => value.Key, value => value.Value);
             return new(assembly.GetName().Version!,
-                metadata.TryGetValue("DevBuildNumber", out var build) ? long.Parse(build!, CultureInfo.InvariantCulture) : 0,
+                metadata.TryGetValue("DevBuildCommit", out var commit) ? commit! : "",
                 metadata.TryGetValue("BuildTimestamp", out var timestamp) ? DateTimeOffset.Parse(timestamp!, CultureInfo.InvariantCulture) : DateTimeOffset.MinValue);
         }
     }
 
-    // CI writes a build number only into development builds.
-    public UpdateChannel Channel => BuildNumber > 0 ? UpdateChannel.Development : UpdateChannel.Stable;
+    // CI writes the commit only into development builds.
+    public UpdateChannel Channel => BuildCommit.Length > 0 ? UpdateChannel.Development : UpdateChannel.Stable;
 }
 
 // Package is the GitHub asset API address; a null package marks the developer simulation.
-public sealed record UpdateRelease(Version Version, long BuildNumber, DateTimeOffset PublishedAt, Uri? Package = null, long PackageSize = 0, string PackageSha256 = "")
+public sealed record UpdateRelease(Version Version, string BuildCommit, DateTimeOffset PublishedAt, Uri? Package = null, long PackageSize = 0, string PackageSha256 = "")
 {
-    public bool Development => BuildNumber > 0;
+    public bool Development => BuildCommit.Length > 0;
     public bool Simulated => Package == null;
-    public string Label => Development ? "Dev build " + BuildNumber.ToString(CultureInfo.InvariantCulture) : Version.ToString(3);
+    public string Label => Development ? "Dev build " + BuildCommit : Version.ToString(3);
     public string DisplayName => Development ? Label : "New version: " + Label;
     public bool IsNewerThan(InstalledVersion current)
     {
         var installed = new Version(current.Version.Major, current.Version.Minor, current.Version.Build);
         if (Version != installed) return Version > installed;
-        if (Development) return current.BuildNumber == 0 ? PublishedAt > current.BuiltAt : BuildNumber > current.BuildNumber;
-        return current.BuildNumber > 0 && PublishedAt > current.BuiltAt;
+        // Commit hashes have no order: another build is newer when it was published after this one was built.
+        if (Development) return BuildCommit != current.BuildCommit && PublishedAt > current.BuiltAt;
+        return current.BuildCommit.Length > 0 && PublishedAt > current.BuiltAt;
     }
     public bool IsInstalled(InstalledVersion current) =>
-        Version == new Version(current.Version.Major, current.Version.Minor, current.Version.Build) && BuildNumber == current.BuildNumber;
+        Version == new Version(current.Version.Major, current.Version.Minor, current.Version.Build) && BuildCommit == current.BuildCommit;
     // Within the installed build's channel only newer releases are offered; after switching
     // channels, the selected channel's latest release replaces whatever is installed.
     public bool IsOfferedTo(InstalledVersion current, UpdateChannel channel) =>
@@ -80,12 +81,14 @@ public sealed class UpdateChecker : IDisposable
             bool development = release.GetProperty("prerelease").GetBoolean();
             string tag = release.GetProperty("tag_name").GetString()!;
             Version? version;
-            long build = 0;
+            string commit = "";
             if (development)
             {
                 if (channel == UpdateChannel.Stable) continue;
-                var match = Regex.Match(tag, @"^dev-build-([1-9][0-9]*)$");
-                if (!match.Success || !long.TryParse(match.Groups[1].Value, out build)) continue;
+                // Development tags carry the first eight characters of the built commit.
+                var match = Regex.Match(tag, @"^dev-build-([0-9a-f]{8})$");
+                if (!match.Success) continue;
+                commit = match.Groups[1].Value;
                 // The CI writes the base application version into the release body.
                 var baseVersion = Regex.Match(release.GetProperty("body").GetString() ?? "", @"(?m)^App-Version: ([0-9]+\.[0-9]+\.[0-9]+)\r?$");
                 if (!baseVersion.Success || !Version.TryParse(baseVersion.Groups[1].Value, out version)) continue;
@@ -100,7 +103,7 @@ public sealed class UpdateChecker : IDisposable
             // The release workflow publishes only after GitHub reports the uploaded SHA-256 digest.
             var digest = Regex.Match(package.TryGetProperty("digest", out var value) ? value.GetString() ?? "" : "", "^sha256:([0-9a-f]{64})$");
             if (!digest.Success) continue;
-            candidates.Add(new(version, build, release.GetProperty("published_at").GetDateTimeOffset(),
+            candidates.Add(new(version, commit, release.GetProperty("published_at").GetDateTimeOffset(),
                 new Uri(package.GetProperty("url").GetString()!), package.GetProperty("size").GetInt64(), digest.Groups[1].Value));
         }
         return channel == UpdateChannel.Stable

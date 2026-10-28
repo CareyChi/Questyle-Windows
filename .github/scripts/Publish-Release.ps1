@@ -1,17 +1,18 @@
 param(
     [Parameter(Mandatory=$true)][ValidateSet('development','stable')][string]$Channel,
     [Parameter(Mandatory=$true)][string]$Version,
-    [Parameter(Mandatory=$true)][long]$BuildNumber
+    [Parameter(Mandatory=$true)][string]$Commit
 )
 $ErrorActionPreference = 'Stop'
-if ($Version -notmatch '^\d+\.\d+\.\d+$' -or $BuildNumber -lt 1) { throw 'Invalid release identity.' }
+if ($Version -notmatch '^\d+\.\d+\.\d+$' -or $Commit -cnotmatch '^[0-9a-f]{8}$') { throw 'Invalid release identity.' }
 $repository = $env:GITHUB_REPOSITORY
 $projectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $asset = Join-Path $projectRoot 'dist/questyle-windows-x64.zip'
 $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
 $development = $Channel -eq 'development'
-$tag = if ($development) { "dev-build-$BuildNumber" } else { "v$Version" }
-$title = if ($development) { "Dev build $BuildNumber" } else { "Questyle Windows v$Version" }
+# Development builds are identified by the first eight characters of their commit.
+$tag = if ($development) { "dev-build-$Commit" } else { "v$Version" }
+$title = if ($development) { "Dev build $Commit" } else { "Questyle Windows v$Version" }
 # Never attach new binaries to a tag that points at a different source revision.
 $existingTag = & git ls-remote --tags origin "refs/tags/$tag"
 if ($LASTEXITCODE) { throw 'Unable to inspect the release tag.' }
@@ -59,7 +60,8 @@ if ($development) {
         foreach ($release in $page) {
             if ($release.prerelease -and !$release.draft -and $release.tag_name -ne $tag) {
                 $deleteArguments = @('release','delete',$release.tag_name,'--repo',$repository,'--yes')
-                if ($release.tag_name -match '^dev-build-[1-9][0-9]*$') { $deleteArguments += '--cleanup-tag' }
+                # Covers both commit tags and the earlier numbered dev-build tags.
+                if ($release.tag_name -match '^dev-build-[0-9a-f]+$') { $deleteArguments += '--cleanup-tag' }
                 & gh @deleteArguments
                 if ($LASTEXITCODE) { throw ('Removing an older prerelease failed: ' + $release.tag_name) }
             }

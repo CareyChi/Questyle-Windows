@@ -1643,7 +1643,9 @@ static class Program
     {
         var frame = new DispatcherFrame();
         var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(milliseconds) };
-        timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+        // Animation values only advance on rendered frames; end on the next frame so they reflect the elapsed time.
+        void Rendered(object? sender, EventArgs e) { CompositionTarget.Rendering -= Rendered; frame.Continue = false; }
+        timer.Tick += (_, _) => { timer.Stop(); CompositionTarget.Rendering += Rendered; };
         timer.Start(); Dispatcher.PushFrame(frame);
     }
 

@@ -1516,20 +1516,24 @@ static class Program
         ((Task)Invoke(window, "CheckUpdatesAsync", true)!).GetAwaiter().GetResult();
         Check(Field<TextBlock>(window, "updateCheckStatus").Text == UiLanguage.Current["检查更新失败"] && Field<Button>(window, "checkUpdatesButton").IsEnabled, "manual update failures show a short error and release the check button");
         var checksStarted = typeof(MainWindow).GetField("updateChecksStarted", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var crossChannel = development with { Version = new Version(0, 0, 1), BuildNumber = 12 };
+        // CI development builds carry a build number, so the installed channel depends on how this test was built.
+        var installedChannel = InstalledVersion.Current.Channel;
+        var otherChannel = installedChannel == UpdateChannel.Stable ? UpdateChannel.Development : UpdateChannel.Stable;
+        var crossChannel = otherChannel == UpdateChannel.Development ? development with { Version = new Version(0, 0, 1), BuildNumber = 12 } : stable with { Version = new Version(0, 0, 1) };
         var checkedChannels = new List<UpdateChannel>();
         checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((channel, _) =>
         {
             checkedChannels.Add(channel);
-            return Task.FromResult<UpdateRelease?>(channel == UpdateChannel.Development ? crossChannel : null);
+            return Task.FromResult<UpdateRelease?>(channel == otherChannel ? crossChannel : null);
         }));
+        Invoke(window, "SelectUpdateChannel", otherChannel);
         checksStarted.SetValue(window, true);
-        Invoke(window, "SelectUpdateChannel", UpdateChannel.Stable);
-        Check(badge.Visibility == Visibility.Collapsed && checkedChannels.SequenceEqual([UpdateChannel.Stable]), "switching channels clears the previous channel's update badge and checks the new channel at once with automatic checks off");
-        Invoke(window, "SelectUpdateChannel", UpdateChannel.Development); SettleTransitions();
-        Check(badge.Visibility == Visibility.Visible && Field<TextBlock>(window, "updatePopupTitle").Text == "Dev build 12", "switching to the development channel immediately offers its latest build even with an older base version");
-        Invoke(window, "SelectUpdateChannel", UpdateChannel.Stable); SettleTransitions();
+        Invoke(window, "SelectUpdateChannel", installedChannel);
+        Check(badge.Visibility == Visibility.Collapsed && checkedChannels.SequenceEqual([installedChannel]), "switching channels clears the previous channel's update badge and checks the new channel at once with automatic checks off");
+        Invoke(window, "SelectUpdateChannel", otherChannel); SettleTransitions();
+        Check(badge.Visibility == Visibility.Visible && Field<TextBlock>(window, "updatePopupTitle").Text == crossChannel.DisplayName, "switching away from the installed build's channel immediately offers that channel's latest release even with an older version");
         checksStarted.SetValue(window, false);
+        Invoke(window, "SelectUpdateChannel", UpdateChannel.Stable); SettleTransitions();
         var aboutButtons = (StackPanel)Field<Button>(window, "checkUpdatesButton").Parent;
         Check(aboutButtons.Children[^2] == Field<Button>(window, "checkUpdatesButton") && aboutButtons.Children[^1] == Field<TextBlock>(window, "updateCheckStatus")
             && ((ScrollViewer)Field<Dictionary<string, FrameworkElement>>(window, "pages")["ABOUT"]).IsAncestorOf(aboutButtons), "the update check button ends the About page button row with its result beside it");

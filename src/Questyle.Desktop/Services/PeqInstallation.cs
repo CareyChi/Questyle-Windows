@@ -1,9 +1,14 @@
 using Microsoft.Win32;
+using Microsoft.Win32.SafeHandles;
+using System.Buffers.Binary;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
+using System.Text;
 using System.Text.Json;
 
 namespace Questyle.Desktop.Services;
@@ -132,9 +137,29 @@ public static class PeqInstallation
     public static long WriteConfiguration(PeqSettings settings)
     {
         long revision = DateTime.UtcNow.Ticks;
-        var temporary = Path.Combine(PeqEndpoint.SharedDirectory, "peq.tmp");
-        File.WriteAllBytes(temporary, settings.ToBytes(revision));
-        File.Move(temporary, Path.Combine(PeqEndpoint.SharedDirectory, "peq.bin"), true);
+        WriteAtomically(Path.Combine(PeqEndpoint.SharedDirectory, "peq.bin"), settings.ToBytes(revision));
         return revision;
     }
+
+    // The audio engine may be reading the file at any moment. A classic replace fails with access
+    // denied while any handle is open; a POSIX-semantics rename replaces the name atomically and
+    // leaves open readers on the previous contents.
+    public static void WriteAtomically(string path, byte[] contents)
+    {
+        using var file = CreateFileW(path + ".tmp", 0x40000000 | 0x00010000, 0, IntPtr.Zero, 2, 0, IntPtr.Zero); // GENERIC_WRITE | DELETE, CREATE_ALWAYS
+        if (file.IsInvalid) throw new Win32Exception();
+        RandomAccess.Write(file, contents, 0);
+        // FILE_RENAME_INFO on x64: Flags at 0, RootDirectory at 8, FileNameLength at 16, FileName at 20.
+        var name = Encoding.Unicode.GetBytes(Path.GetFullPath(path));
+        var information = new byte[20 + name.Length + 2];
+        BinaryPrimitives.WriteInt32LittleEndian(information, 0x1 | 0x2); // REPLACE_IF_EXISTS | POSIX_SEMANTICS
+        BinaryPrimitives.WriteInt32LittleEndian(information.AsSpan(16), name.Length);
+        name.CopyTo(information, 20);
+        if (!SetFileInformationByHandle(file, 22, information, information.Length)) throw new Win32Exception(); // FileRenameInfoEx
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetFileInformationByHandle(SafeFileHandle file, int informationClass, byte[] information, int size);
 }

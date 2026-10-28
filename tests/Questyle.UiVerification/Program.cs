@@ -238,6 +238,13 @@ static class Program
             }
             Check(true, "fast real-valued preview matches the original complex DSP through high-Q centers, notches and 8-384 kHz rates within 0.0001 dB");
             try { peqDefinition.ResponseCurve([24000], 48000); throw new Exception("Invalid preview frequency accepted"); } catch (ArgumentException) { Check(true, "batched preview rejects frequencies at Nyquist"); }
+            var atomicConfiguration = Path.Combine(AppPaths.DataDirectory, "atomic-configuration.bin"); File.WriteAllBytes(atomicConfiguration, [1]);
+            using (var reader = new FileStream(atomicConfiguration, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            {
+                PeqInstallation.WriteAtomically(atomicConfiguration, [2, 3]);
+                Check(reader.ReadByte() == 1 && File.ReadAllBytes(atomicConfiguration).SequenceEqual(new byte[] { 2, 3 }) && !File.Exists(atomicConfiguration + ".tmp"), "PEQ configuration replacement succeeds while the audio engine has the file open and leaves that reader on the previous contents");
+            }
+            File.Delete(atomicConfiguration);
             Invoke(window, "SetPeq", peqDefinition);
             Render(window, "peq", 1240, 800);
             var allBandsToggle = Field<CheckBox>(window, "peqBandsEnabled");

@@ -1,6 +1,7 @@
 #define PEQ_TESTS
 #include "../../src/Questyle.Peq.Native/PeqApo.cpp"
 #include <cstdio>
+#include <cstring>
 #include <vector>
 #include <stdexcept>
 #include <filesystem>
@@ -54,10 +55,16 @@ peq::Settings settings(int64_t revision,bool enabled,double preamp,std::initiali
     std::copy(bands.begin(),bands.end(),s.bands); return s;
 }
 void write(const std::wstring& directory,const peq::Settings& s) {
-    const auto temporary=directory+L"\\peq.tmp", target=directory+L"\\peq.bin";
-    HANDLE file=CreateFileW(temporary.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,0,nullptr); DWORD written;
+    // Same replacement as the application: a POSIX-semantics rename succeeds while the APO is reading peq.bin.
+    const auto temporary=directory+L"\\peq.bin.tmp", target=directory+L"\\peq.bin";
+    HANDLE file=CreateFileW(temporary.c_str(),GENERIC_WRITE|DELETE,0,nullptr,CREATE_ALWAYS,0,nullptr); DWORD written;
     if(file==INVALID_HANDLE_VALUE || !WriteFile(file,&s,sizeof(peq::Header)+s.header.count*sizeof(peq::Band),&written,nullptr)) throw std::runtime_error("write config");
-    CloseHandle(file); if(!MoveFileExW(temporary.c_str(),target.c_str(),MOVEFILE_REPLACE_EXISTING)) throw std::runtime_error("replace config");
+    // FILE_RENAME_INFO on x64: Flags at 0, RootDirectory at 8, FileNameLength at 16, FileName at 20.
+    std::vector<BYTE> information(20+target.size()*sizeof(wchar_t)+sizeof(wchar_t));
+    DWORD flags=0x1|0x2, length=static_cast<DWORD>(target.size()*sizeof(wchar_t)); // REPLACE_IF_EXISTS | POSIX_SEMANTICS
+    memcpy(information.data(),&flags,sizeof(flags)); memcpy(information.data()+16,&length,sizeof(length)); memcpy(information.data()+20,target.c_str(),length);
+    bool renamed=SetFileInformationByHandle(file,static_cast<FILE_INFO_BY_HANDLE_CLASS>(22),information.data(),static_cast<DWORD>(information.size())); // FileRenameInfoEx
+    CloseHandle(file); if(!renamed) throw std::runtime_error("replace config");
 }
 }
 int wmain(int argc,wchar_t** argv) {
@@ -119,8 +126,11 @@ int wmain(int argc,wchar_t** argv) {
         check(waitRevision(3),"rapid atomic configuration changes reach the audio callback");
         Sleep(30); rt->APOProcess(1,inputs,1,outputs);
         check(std::equal(input.begin(),input.end(),output.begin()),"master bypass returns exact float samples");
+        HANDLE reader=CreateFileW((directory+L"\\peq.bin").c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,0,nullptr);
+        check(reader!=INVALID_HANDLE_VALUE,"configuration can be held open the way the APO reads it");
         auto bad=settings(4,true,0,{{1,0,1000,6,1}}); bad.bands[0].q=0;
-        write(directory,bad); Sleep(80); rt->APOProcess(1,inputs,1,outputs);
+        write(directory,bad); CloseHandle(reader); check(true,"configuration replacement succeeds while the APO has the file open");
+        Sleep(80); rt->APOProcess(1,inputs,1,outputs);
         check(std::equal(input.begin(),input.end(),output.begin()),"invalid configuration cannot replace the last accepted DSP");
         check(SUCCEEDED(cfg->UnlockForProcess()),"unlock stops the watcher and releases mapped files");
         write(directory,settings(5,true,0,{{1,0,22000,1,1}})); media.f.rate=44100;

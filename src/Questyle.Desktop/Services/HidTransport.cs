@@ -72,6 +72,18 @@ public static class HidTransport
         return devices;
     }
 
+    public static async Task WaitForControlInterfaceAsync()
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(8);
+        do
+        {
+            await Task.Delay(400);
+            var devices = await Task.Run(Enumerate);
+            if (devices.Any(device => device.InputReportId == 0xbb)) return;
+        } while (DateTime.UtcNow < deadline);
+        throw new TimeoutException("USB 接口尚未恢复，请重新读取设备。");
+    }
+
     private static class Native
     {
         [StructLayout(LayoutKind.Sequential)] internal struct InterfaceData { internal int Size; internal Guid Guid; internal int Flags; internal UIntPtr Reserved; }

@@ -10,7 +10,8 @@ if (args.Contains("--snapshot") || args.Contains("--same-settings"))
     Console.WriteLine(JsonSerializer.Serialize(current, new JsonSerializerOptions { WriteIndented = true }));
     if (args.Contains("--same-settings"))
     {
-        var after = await controller.RunAsync(s => { s.SetGame(current.GameMode); if (current.ActiveCodec == "LDAC" && current.Ldac is >= 1 and <= 3) s.SetLdac(current.Ldac); if (current.ActiveCodec == "aptX Adaptive" && current.Adaptive is >= 1 and <= 2) s.SetAdaptive(current.Adaptive); return s.Snapshot(); });
+        var gameMode = current.GameMode ?? throw new InvalidOperationException("Unknown game mode response; cannot write it back.");
+        var after = await controller.RunAsync(s => { s.SetGame(gameMode); if (current.ActiveCodec == "LDAC" && current.Ldac is >= 1 and <= 3) s.SetLdac(current.Ldac); if (current.ActiveCodec == "aptX Adaptive" && current.Adaptive is >= 1 and <= 2) s.SetAdaptive(current.Adaptive); return s.Snapshot(); });
         if (after.Ldac != current.Ldac || after.Adaptive != current.Adaptive || after.GameMode != current.GameMode) throw new Exception("Hardware readback mismatch");
         Console.WriteLine("PASS real device acknowledged the original game setting and read back unchanged settings. Codec-specific writes were checked only for the active codec.");
     }
@@ -85,12 +86,83 @@ Check(AudioSink.Parse(new byte[2]) == null, "short headphone payload");
 var fake = new AckTransport(); var session = new DongleController.Session(fake, _ => { }, CancellationToken.None);
 session.SetGame(true); session.SetGame(false); session.SetAuracast(true); session.SetAuracast(false);
 Check(fake.Commands.SequenceEqual(new (byte, byte)[] { (0x11, 2), (0x11, 1), (0x22, 1), (0x22, 0) }), "APK game and Auracast use different boolean encodings");
+Check(DongleController.ParseGameMode([1]) == false && DongleController.ParseGameMode([2]) == true && DongleController.ParseGameMode([0x83]) == null && DongleController.ParseGameMode([]) == null && DongleController.ParseGameMode([1, 2]) == null, "unknown game replies do not become a valid microphone setting");
 fake.Commands.Clear(); session.SetLdac(1); session.SetLdac(2); session.SetLdac(3); session.SetAdaptive(1); session.SetAdaptive(2);
 Check(fake.Commands.SequenceEqual(new (byte, byte)[] { (0xe0, 1), (0xe0, 2), (0xe0, 3), (0xf0, 1), (0xf0, 2) }), "APK LDAC and Adaptive subcommands");
 try { session.Rename(new string('中', 8)); throw new Exception("UTF8 length accepted"); } catch (ArgumentException) { Check(true, "rename bound counts UTF8 bytes"); }
 session.Connect("01:02:03:04:05:06"); Check(fake.LastPayload.SequenceEqual(new byte[] { 1, 2, 3, 4, 5, 6 }), "connect command carries six address bytes");
 try { QuestyleProtocol.Encode(1, 1, 1, new byte[57]); throw new Exception("oversized payload accepted"); }
 catch (ArgumentOutOfRangeException) { count++; Console.WriteLine("PASS HID payload bound"); }
+
+using (var cancellation = new CancellationTokenSource())
+{
+    var discovery = new DiscoveryTransport();
+    var search = new DongleController.Session(discovery, _ => { }, cancellation.Token);
+    var found = new List<AudioSink>();
+    try
+    {
+        search.Search(TimeSpan.FromSeconds(5), sink => { found.Add(sink); if (found.Count == 2) cancellation.Cancel(); });
+        throw new Exception("Search ignored cancellation");
+    }
+    catch (OperationCanceledException)
+    {
+        Check(found.Count == 2 && discovery.Reads == 3 && discovery.Commands.Take(2).SequenceEqual(new (byte, byte)[] { (0xb0, 0xff), (0xb0, 0) }) && discovery.Commands.Last() == (0xb0, 2) && !discovery.Searching, "live discovery deduplicates results and exits search before returning cancellation");
+    }
+}
+
+using (var cancellation = new CancellationTokenSource())
+{
+    var discovery = new DiscoveryTransport { RejectExit = true };
+    var search = new DongleController.Session(discovery, _ => { }, cancellation.Token);
+    try { search.Search(TimeSpan.FromSeconds(5), _ => cancellation.Cancel()); throw new Exception("Failed exit ACK was ignored"); }
+    catch (IOException) { Check(discovery.Commands.Last() == (0xb0, 2), "failed exit-search ACK is reported instead of being swallowed as cancellation"); }
+}
+
+using (var cancellation = new CancellationTokenSource())
+{
+    var discovery = new DiscoveryTransport(searching: true);
+    var search = new DongleController.Session(discovery, _ => { }, cancellation.Token);
+    try { search.Search(TimeSpan.FromSeconds(5), _ => cancellation.Cancel()); throw new Exception("Search ignored cancellation"); }
+    catch (OperationCanceledException)
+    {
+        Check(discovery.Commands.Take(3).SequenceEqual(new (byte, byte)[] { (0xb0, 0xff), (0xb0, 2), (0xb0, 0) }) && !discovery.Searching, "a leftover pairing mode is stopped before a fresh search instead of receiving start rejection 83");
+    }
+}
+
+var rapidDiscovery = new DiscoveryTransport { StartupDelay = TimeSpan.FromSeconds(2), StatusAlways82 = true };
+for (int attempt = 0; attempt < 4; attempt++)
+{
+    using var cancellation = new CancellationTokenSource();
+    rapidDiscovery.Started = cancellation.Cancel;
+    var search = new DongleController.Session(rapidDiscovery, _ => { }, cancellation.Token);
+    try { search.Search(TimeSpan.FromSeconds(5)); throw new Exception("Search ignored immediate cancellation"); }
+    catch (OperationCanceledException) { }
+    Check(!rapidDiscovery.Searching && rapidDiscovery.Reads == 0 && rapidDiscovery.Commands.Count(command => command == (0xb0, 2)) == attempt + 1, "rapid cancel waits for firmware startup before stopping, even with constant status 82: " + attempt);
+}
+
+var lostStart = new DiscoveryTransport { LoseStartReply = true };
+try { new DongleController.Session(lostStart, _ => { }, CancellationToken.None).Search(TimeSpan.FromSeconds(5)); throw new Exception("Lost start reply was ignored"); }
+catch (TimeoutException)
+{
+    Check(!lostStart.Searching && lostStart.Commands.TakeLast(2).SequenceEqual(new (byte, byte)[] { (0xb0, 0xff), (0xb0, 2) }), "a lost start ACK still queries and exits pairing mode while reporting the original timeout");
+}
+
+var rejectedStart = new DiscoveryTransport { RejectStart = true };
+try { new DongleController.Session(rejectedStart, _ => { }, CancellationToken.None).Search(TimeSpan.FromSeconds(5)); throw new Exception("Start rejection was ignored"); }
+catch (IOException ex)
+{
+    Check(ex.Message.EndsWith("83") && !rejectedStart.Searching && rejectedStart.Commands.All(command => command != (0xb0, 2)), "start rejection 83 remains an error and inactive search receives no blind stop command");
+}
+
+using (var cancellation = new CancellationTokenSource())
+{
+    cancellation.Cancel(); var discovery = new DiscoveryTransport();
+    try { new DongleController.Session(discovery, _ => { }, cancellation.Token).Search(TimeSpan.FromSeconds(5)); throw new Exception("Pre-canceled search was started"); }
+    catch (OperationCanceledException) { Check(discovery.Commands.Count == 0, "canceling before search begins sends no USB command"); }
+}
+
+var connected = new DongleSnapshot("Test", "1", [], [], "aptX Adaptive", "01:02:03:04:05:06", "Headphones", 1, 1, false, 0, DateTime.Now);
+Check(connected.HasConnectedHeadphone && !(connected with { HeadphoneAddress = "00:00:00:00:00:00" }).HasConnectedHeadphone && !(connected with { HeadphoneAddress = "" }).HasConnectedHeadphone && !(connected with { ActiveCodec = "未连接" }).HasConnectedHeadphone, "connected status requires both a nonzero headphone address and an active codec");
 
 Console.WriteLine($"{count} checks passed.");
 
@@ -102,5 +174,48 @@ sealed class AckTransport : IQuestyleTransport
     {
         Commands.Add((packet[3], packet[4])); LastPayload = packet.AsSpan(6, packet[5]).ToArray();
         byte[] ack = [0x51, 0x4c, packet[2], 0x41, 1, 0x80, 0]; ack[^1] = unchecked((byte)-ack.Sum(x => x)); return ack;
+    }
+}
+
+sealed class DiscoveryTransport(bool searching = false) : IQuestyleTransport
+{
+    public bool RejectExit { get; init; }
+    public bool RejectStart { get; init; }
+    public bool LoseStartReply { get; init; }
+    public TimeSpan StartupDelay { get; init; }
+    public bool StatusAlways82 { get; init; }
+    private long? startedAt;
+    public Action? Started { get; set; }
+    public bool Searching { get; private set; } = searching;
+    public List<(byte, byte)> Commands { get; } = [];
+    public int Reads { get; private set; }
+    public byte[] Exchange(byte[] packet, TimeSpan timeout)
+    {
+        Commands.Add((packet[3], packet[4]));
+        byte[] payload = [0x80];
+        if (packet[3] == 0xb0 && packet[4] == 0xff) payload = [Searching && !StatusAlways82 ? (byte)0x80 : (byte)0x82];
+        if (packet[3] == 0xb0 && packet[4] == 0)
+        {
+            if (Searching || RejectStart) payload = [0x83];
+            else
+            {
+                Searching = true; startedAt = System.Diagnostics.Stopwatch.GetTimestamp(); Started?.Invoke();
+                if (LoseStartReply) throw new TimeoutException("Simulated lost search-start ACK");
+            }
+        }
+        if (packet[3] == 0xb0 && packet[4] == 2)
+        {
+            if (RejectExit || startedAt is long timestamp && System.Diagnostics.Stopwatch.GetElapsedTime(timestamp) < StartupDelay) payload = [0x83];
+            else Searching = false;
+        }
+        if (packet[3] == 0xb0 && packet[4] == 1)
+        {
+            Reads++;
+            payload = [1, 2, 3, 4, 5, (byte)(Reads < 3 ? 6 : 7), (byte)'A', 4];
+        }
+        var reply = new byte[payload.Length + 6];
+        reply[0] = 0x51; reply[1] = 0x4c; reply[2] = packet[2]; reply[3] = 0x41; reply[4] = (byte)payload.Length;
+        payload.CopyTo(reply, 5); reply[^1] = unchecked((byte)-reply.Sum(value => value));
+        return reply;
     }
 }

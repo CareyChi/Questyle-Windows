@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 
@@ -22,14 +23,17 @@ public sealed record AudioSink(string Address, string Name, byte Codec)
 
 public sealed record DongleSnapshot(string Name, string Version, IReadOnlyList<CodecOption> SupportedCodecs,
     IReadOnlyList<CodecOption> HeadphoneCodecs, string ActiveCodec, string HeadphoneAddress,
-    string HeadphoneName, byte Ldac, byte Adaptive, bool GameMode, byte Auracast, DateTime ReadAt);
+    string HeadphoneName, byte Ldac, byte Adaptive, bool? GameMode, byte Auracast, DateTime ReadAt)
+{
+    public bool HasConnectedHeadphone => HeadphoneAddress.Length > 0 && HeadphoneAddress != "00:00:00:00:00:00" && ActiveCodec is not ("未连接" or "未识别");
+}
 
 public sealed class DongleController
 {
     // AudioSinkUtil.changeCodecs and fromValue, independently cross-checked
     // against the APK's big-endian supported-codec bit masks.
     public static readonly CodecOption[] Codecs = [new(8,"LDAC"),new(4,"aptX Adaptive"),new(2,"aptX HD"),
-        new(1,"aptX"),new(7,"LHDC"),new(9,"AAC"),new(10,"LE Audio"),new(11,"SBC")];
+        new(1,"aptX"),new(7,"LHDC"),new(9,"AAC"),new(10,"LC3"),new(11,"SBC")];
     private readonly SemaphoreSlim gate = new(1, 1);
     public event Action<string>? Log;
 
@@ -38,6 +42,8 @@ public sealed class DongleController
         uint mask = 0; foreach (var value in bytes) mask = (mask << 8) | value;
         return Codecs.Where(c => (mask & (1u << (c.Code - 1))) != 0).ToArray();
     }
+
+    public static bool? ParseGameMode(ReadOnlySpan<byte> bytes) => bytes.Length == 1 ? bytes[0] switch { 1 => false, 2 => true, _ => null } : null;
 
     public async Task<T> RunAsync<T>(Func<Session, T> action, CancellationToken ct = default)
     {
@@ -124,6 +130,72 @@ public sealed class DongleController
             RequireAck(Send(0x90, 1, bytes));
         }
         public void Connect(string address) => RequireAck(Send(0xc0, 0, ParseAddress(address)));
+        // On Pro2 hardware C0/00 returns 83 while another headphone is connected and 81 while search
+        // mode is active. Search mode releases the current headphone (APK connectAudioSink enters it
+        // first); leave it once the status shows the release, then connect the saved address.
+        public void ConnectReplacingCurrent(string address)
+        {
+            if (CurrentAddress().Any(b => b != 0))
+            {
+                RequireAck(Send(0xb0, 0));
+                var until = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+                while (CurrentAddress().Any(b => b != 0))
+                {
+                    if (DateTime.UtcNow < until) continue;
+                    RequireAck(Send(0xb0, 2));
+                    throw new IOException("当前耳机未释放，未发送连接指令。");
+                }
+                RequireAck(Send(0xb0, 2));
+            }
+            Connect(address);
+        }
+        // Once search mode has ended, Pro2 rejects C0/00 with 82 for a headphone it has not paired
+        // before (MOMENTUM 4). Like APK connectAudioSink, send it in search mode, after the search has
+        // discovered the headphone and the current one is released.
+        public bool ConnectDiscovered(string address, TimeSpan timeout)
+        {
+            RequireAck(Send(0xb0, 0));
+            var until = DateTime.UtcNow + TimeSpan.FromSeconds(12);
+            bool discovered = false;
+            while (!discovered || CurrentAddress().Any(b => b != 0))
+            {
+                if (DateTime.UtcNow >= until)
+                {
+                    RequireAck(Send(0xb0, 2));
+                    throw new IOException("搜索中未发现该耳机或当前耳机未释放，未发送连接指令。");
+                }
+                if (!discovered) discovered = AudioSink.Parse(Send(0xb0, 1)) is { } sink && sink.Address.Equals(address, StringComparison.OrdinalIgnoreCase);
+                Thread.Sleep(300);
+            }
+            var reply = Send(0xc0, 0, ParseAddress(address));
+            if (reply is not [0x80]) RequireAck(Send(0xb0, 2));
+            RequireAck(reply);
+            bool connected = WaitForHeadphone(address, timeout);
+            // B0/02 returned 83 after the connection; APK querySinkSearchStatus treats only 80 as searching.
+            if (Send(0xb0, 0xff) is [0x80]) RequireAck(Send(0xb0, 2));
+            return connected;
+        }
+        // Polls in the current session: releasing USB and reading in a new session later interrupts
+        // the new headphone's audio a second time and delays the connection display.
+        public bool WaitForHeadphone(string address, TimeSpan timeout)
+        {
+            var expected = ParseAddress(address);
+            var until = DateTime.UtcNow + timeout;
+            while (true)
+            {
+                var status = ConnectionStatus();
+                if (status[4..10].SequenceEqual(expected) && ParseCodecs(status.AsSpan(0, 2)).Count > 0) return true;
+                if (DateTime.UtcNow >= until) return false;
+                Thread.Sleep(300);
+            }
+        }
+        private byte[] CurrentAddress() => ConnectionStatus()[4..10];
+        private byte[] ConnectionStatus()
+        {
+            var status = Send(0x30, 2);
+            if (status.Length < 10) throw new IOException("连接状态回复长度不正确：" + Convert.ToHexString(status));
+            return status;
+        }
         public void Disconnect() => RequireAck(Send(0xc0, 1));
         public void Forget(string address) => RequireAck(Send(0xc0, 2, ParseAddress(address)));
         private static byte[] ParseAddress(string address)
@@ -132,29 +204,53 @@ public sealed class DongleController
             if (bytes.Length != 6) throw new ArgumentException("蓝牙地址必须包含 6 个字节。");
             return bytes;
         }
-        public AudioSink[] Search(TimeSpan duration)
+        public AudioSink[] Search(TimeSpan duration, Action<AudioSink>? discovered = null)
         {
             var found = new Dictionary<string, AudioSink>();
-            RequireAck(Send(0xb0, 0));
+            // APK searchAudioSink queries B0/FF and exits an existing search before entering again.
+            if (Send(0xb0, 0xff) is [0x80]) FinishSearch(true);
+            ct.ThrowIfCancellationRequested();
+            bool started = false;
+            long? startedAt = null;
             try
             {
+                RequireAck(Send(0xb0, 0));
+                startedAt = Stopwatch.GetTimestamp();
+                started = true;
                 var until = DateTime.UtcNow + duration;
                 while (DateTime.UtcNow < until)
                 {
                     ct.ThrowIfCancellationRequested();
                     var sink = AudioSink.Parse(Send(0xb0, 1));
-                    if (sink != null) found[sink.Address] = sink;
+                    if (sink != null && (!found.TryGetValue(sink.Address, out var previous) || previous != sink))
+                    {
+                        found[sink.Address] = sink;
+                        discovered?.Invoke(sink);
+                    }
                     Thread.Sleep(300);
                 }
                 return found.Values.ToArray();
             }
-            finally
+            finally { FinishSearch(started, startedAt); }
+        }
+
+        private void FinishSearch(bool started, long? startedAt = null)
+        {
+            cleaningUp = true;
+            try
             {
-                cleaningUp = true;
-                try { RequireAck(Send(0xb0, 2)); }
-                catch (Exception ex) { log("退出搜索模式失败：" + ex.Message); }
-                finally { cleaningUp = false; }
+                // Pro2 ACKs entry before it can accept B0/02. Hardware returned 83 on an
+                // immediate stop and 80 after two seconds; B0/FF stayed 82 in both states.
+                if (startedAt is long timestamp)
+                {
+                    var remaining = TimeSpan.FromSeconds(2) - Stopwatch.GetElapsedTime(timestamp);
+                    if (remaining > TimeSpan.Zero) Thread.Sleep(remaining);
+                }
+                // A failed start reply can still leave the device searching. Confirm that state
+                // before stopping; cancellation must not interrupt this cleanup exchange.
+                if (started || Send(0xb0, 0xff) is [0x80]) RequireAck(Send(0xb0, 2));
             }
+            finally { cleaningUp = false; }
         }
 
         public DongleSnapshot Snapshot()
@@ -179,7 +275,7 @@ public sealed class DongleController
             var game = Send(0x11, 255);
             var aura = Send(0x22, 255);
             return new(name, versionText, supported, headphones, codec, address, sinkName,
-                ldac.FirstOrDefault(), adaptive.FirstOrDefault(), game.FirstOrDefault() == 2, aura.FirstOrDefault(), DateTime.Now);
+                ldac.FirstOrDefault(), adaptive.FirstOrDefault(), ParseGameMode(game), aura.Length == 1 ? aura[0] : byte.MaxValue, DateTime.Now);
         }
     }
 }

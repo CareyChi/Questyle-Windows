@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -6,14 +6,41 @@
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <AssemblyName>Questyle</AssemblyName>
     <Version>0.1.0</Version>
+    <ApplicationIcon>Assets\Questyle.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <IncludeWindowsSDKRefFrameworkReferences>false</IncludeWindowsSDKRefFrameworkReferences>
+    <UseWindowsForms>true</UseWindowsForms>
+    <SatelliteResourceLanguages>zh-Hans;zh-Hant</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="Assets\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Content Include="Assets\*.png;Assets\*.ico" Link="assets\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Codecs\*.png" Link="assets\codecs\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Language\*.json" Link="language\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="UsbDkHelper.dll" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="BuildPeqNative" BeforeTargets="BeforeBuild"
+          Inputs="../Questyle.Peq.Native/ApoAbi.h;../Questyle.Peq.Native/Dsp.h;../Questyle.Peq.Native/PeqApo.cpp;../Questyle.Peq.Native/PeqApo.def;../Questyle.Peq.Native/build.ps1"
+          Outputs="$(MSBuildProjectDirectory)/obj/peq/Questyle.Peq.Native.dll">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)/../Questyle.Peq.Native/build.ps1&quot; -OutputDirectory &quot;$(MSBuildProjectDirectory)/obj/peq&quot;" />
+  </Target>
+  <ItemGroup>
+    <Content Include="obj/peq/Questyle.Peq.Native.dll" Link="Questyle.Peq.Native.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="CreatePortableAppHost" AfterTargets="Publish" Condition="'$(PortableLayout)' == 'true'">
+    <CreateAppHost AppHostSourcePath="$(AppHostSourcePath)"
+                   AppHostDestinationPath="$(PublishDir)..\Questyle.exe"
+                   AppBinaryName="runtime/Questyle.dll"
+                   IntermediateAssembly="$(TargetPath)"
+                   WindowsGraphicalUserInterface="true" />
+    <Delete Files="$(PublishDir)Questyle.exe" />
+  </Target>
 
 </Project>

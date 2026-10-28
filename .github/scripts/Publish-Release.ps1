@@ -38,8 +38,12 @@ else { $arguments += '--latest' }
 if ($LASTEXITCODE) { throw 'Creating the draft release failed.' }
 & gh release upload $tag $asset --repo $repository
 if ($LASTEXITCODE) { throw 'Uploading the release asset failed; the release remains a draft.' }
-$assetInfo = & gh api "repos/$repository/releases/tags/$tag" | ConvertFrom-Json
+# A draft has no Git tag yet, so it is found in the release list rather than by tag.
+$draftPages = & gh api "repos/$repository/releases?per_page=100" --paginate --slurp | ConvertFrom-Json
 if ($LASTEXITCODE) { throw 'Reading the uploaded release failed.' }
+$drafts = @(foreach ($page in $draftPages) { foreach ($release in $page) { if ($release.draft -and $release.tag_name -eq $tag) { $release } } })
+if ($drafts.Count -ne 1) { throw ('Expected exactly one draft release for ' + $tag) }
+$assetInfo = $drafts[0]
 $uploaded = @($assetInfo.assets | Where-Object name -eq 'questyle-windows-x64.zip')
 if ($uploaded.Count -ne 1 -or $uploaded[0].state -ne 'uploaded' -or $uploaded[0].size -ne (Get-Item -LiteralPath $asset).Length -or $uploaded[0].digest -ne "sha256:$hash") { throw 'Release asset integrity verification failed.' }
 if ($development) { & gh release edit $tag --repo $repository --draft=false --latest=false }

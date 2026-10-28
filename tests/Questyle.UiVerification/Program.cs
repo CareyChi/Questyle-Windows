@@ -459,7 +459,8 @@ static class Program
             SettleTransitions(); Render(window, "peq-notice", 1240, 800);
             var noticeContainer = (FrameworkElement)window.FindName("FrameContent");
             var noticeBounds = peqNotice.TransformToAncestor(noticeContainer).TransformBounds(new Rect(peqNotice.RenderSize));
-            Check(Math.Abs(noticeBounds.Left + noticeBounds.Width / 2 - noticeContainer.ActualWidth / 2) < 1 && noticeBounds.Top >= 60 && !peqNotice.IsHitTestVisible, "PEQ operation feedback is centered near the top and does not intercept clicks");
+            Check(Math.Abs(noticeBounds.Left + noticeBounds.Width / 2 - noticeContainer.ActualWidth / 2) < 1 && noticeBounds.Top >= 60 && !peqNotice.IsHitTestVisible,
+                $"PEQ operation feedback is centered near the top and does not intercept clicks (notice {noticeBounds}, container width {noticeContainer.ActualWidth}, {peqNotice.Visibility}, \"{peqNoticeText.Text}\")");
             SettleTransitions(2700);
             Check(peqNotice.Visibility == Visibility.Collapsed && !Field<DispatcherTimer>(window, "peqNoticeTimer").IsEnabled, "PEQ operation feedback fades away and stops its timer");
             Invoke(window, "PeqUserAction", (Action)(() => throw new IOException("simulated PEQ action failure")));

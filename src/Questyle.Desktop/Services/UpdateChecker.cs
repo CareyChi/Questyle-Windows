@@ -67,11 +67,27 @@ public sealed class UpdateChecker : IDisposable
 
     public async Task<UpdateRelease?> CheckAsync(UpdateChannel channel, CancellationToken cancellationToken)
     {
-        using var response = await client.GetAsync("https://api.github.com/repos/CareyChi/Questyle-Windows/releases?per_page=100", cancellationToken).ConfigureAwait(false);
+        using var response = await GetReleasesAsync(cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
         return SelectRelease(document.RootElement, channel);
+    }
+
+    private async Task<HttpResponseMessage> GetReleasesAsync(CancellationToken cancellationToken)
+    {
+        const string address = "https://api.github.com/repos/CareyChi/Questyle-Windows/releases?per_page=100";
+        try
+        {
+            return await client.GetAsync(address, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex) when (ex.HttpRequestError == HttpRequestError.SecureConnectionError && ex.InnerException is IOException)
+        {
+            // A transport EOF during the TLS handshake retires that connection. Allow
+            // this observed interruption one new connection, without changing TLS or proxy settings.
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+            return await client.GetAsync(address, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     public static UpdateRelease? SelectRelease(JsonElement releases, UpdateChannel channel)

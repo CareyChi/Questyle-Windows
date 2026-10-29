@@ -1440,6 +1440,41 @@ static class Program
             try { checker.CheckAsync(UpdateChannel.Stable, CancellationToken.None).GetAwaiter().GetResult(); throw new Exception("Failed HTTP request accepted"); }
             catch (HttpRequestException) { Check(true, "HTTP errors are not reported as an up-to-date success"); }
         }
+        var interruptedHandshake = new HttpRequestException(HttpRequestError.SecureConnectionError,
+            "The SSL connection could not be established", new IOException("Received an unexpected EOF or 0 bytes from the transport stream."));
+        int attempts = 0;
+        using (var checker = new UpdateChecker(new UpdateResponseHandler(_ =>
+        {
+            if (++attempts == 1) throw interruptedHandshake;
+            return new(HttpStatusCode.OK) { Content = new StringContent(json) };
+        })))
+            Check(checker.CheckAsync(UpdateChannel.Development, CancellationToken.None).GetAwaiter().GetResult()!.BuildCommit == "1a2b3c4" && attempts == 2,
+                "a TLS transport interruption can recover once and must parse a real successful release response");
+        attempts = 0;
+        using (var checker = new UpdateChecker(new UpdateResponseHandler(_ => { attempts++; throw interruptedHandshake; })))
+        {
+            try { checker.CheckAsync(UpdateChannel.Stable, CancellationToken.None).GetAwaiter().GetResult(); throw new Exception("Persistent TLS interruption accepted"); }
+            catch (HttpRequestException ex) { Check(ReferenceEquals(ex, interruptedHandshake) && attempts == 2, "a repeated TLS interruption stops after two requests and reports the failure"); }
+        }
+        attempts = 0;
+        using (var checker = new UpdateChecker(new UpdateResponseHandler(_ =>
+        {
+            attempts++;
+            throw new HttpRequestException(HttpRequestError.SecureConnectionError, "Invalid certificate", new System.Security.Authentication.AuthenticationException("Certificate rejected"));
+        })))
+        {
+            try { checker.CheckAsync(UpdateChannel.Stable, CancellationToken.None).GetAwaiter().GetResult(); throw new Exception("Invalid certificate accepted"); }
+            catch (HttpRequestException) { Check(attempts == 1, "certificate authentication failures are not retried"); }
+        }
+        attempts = 0;
+        using (var cancellation = new CancellationTokenSource())
+        using (var checker = new UpdateChecker(new UpdateResponseHandler(_ => { attempts++; throw interruptedHandshake; })))
+        {
+            var check = checker.CheckAsync(UpdateChannel.Stable, cancellation.Token);
+            cancellation.Cancel();
+            try { check.GetAwaiter().GetResult(); throw new Exception("Cancelled TLS recovery completed"); }
+            catch (OperationCanceledException) { Check(attempts == 1, "cancelling a check during TLS recovery prevents the second request"); }
+        }
         var automatic = Field<CheckBox>(window, "automaticUpdates");
         Check(automatic.IsChecked == true && UpdateSettings.Load().Channel == UpdateChannel.Stable && Field<DispatcherTimer>(window, "updateTimer").Interval == TimeSpan.FromMinutes(5), "update checks default to automatic stable checks at five-minute intervals");
         automatic.IsChecked = false; automatic.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));

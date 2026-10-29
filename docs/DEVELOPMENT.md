@@ -4,7 +4,7 @@
 
 ## 1. 当前范围
 
-本项目从 Questyle Android `1.8.0 / build 78` APK 逆向重建 Windows USB Dongle 客户端，当前版本号为 `0.1.1`。原始 APK 在本机 reverse/base.apk。现有界面按「设备」「PEQ」「设置」「关于」排列，设备改名位于设置页。
+本项目从 Questyle Android `1.8.0 / build 78` APK 逆向重建 Windows USB Dongle 客户端，当前版本号为 `0.1.2`。原始 APK 在本机 reverse/base.apk。现有界面按「设备」「PEQ」「设置」「关于」排列，设备改名位于设置页。
 
 Wi-Fi 播放器、本地音乐及底部播放栏已从源码移除，对应服务、依赖和测试也已清理，不属于当前功能。根目录启动脚本已删除；`dist` 已更新为包含独立 PEQ 的本地发布包，不纳入 Git。
 

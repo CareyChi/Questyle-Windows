@@ -15,7 +15,6 @@ public partial class MainWindow
     private readonly CheckBox automaticUpdates = new();
     private readonly Border updateChannelSelector = new();
     private readonly TranslateTransform updateChannelIndicator = new();
-    private readonly DispatcherTimer updateTimer = new() { Interval = TimeSpan.FromMinutes(5) };
     private readonly DispatcherTimer updateHoverTimer = new() { Interval = TimeSpan.FromMilliseconds(150) };
     private readonly Border versionHoverArea = new();
     private readonly Border newVersionBadge = new() { Visibility = Visibility.Collapsed };
@@ -86,8 +85,6 @@ public partial class MainWindow
             {
                 var updated = updateSettings with { Automatic = automaticUpdates.IsChecked == true };
                 updated.Save(); updateSettings = updated;
-                if (!updated.Automatic) { updateTimer.Stop(); updateRequest?.Cancel(); }
-                else if (updateChecksStarted) { updateTimer.Start(); _ = CheckUpdatesAsync(false); }
             }
             catch (Exception ex) { automaticUpdates.IsChecked = updateSettings.Automatic; ShowError(ex); }
         };
@@ -151,15 +148,33 @@ public partial class MainWindow
     public void StartUpdateChecks()
     {
         updateChecksStarted = true;
-        updateTimer.Tick += async (_, _) => await CheckUpdatesAsync(false);
-        if (!updateSettings.Automatic) return;
-        updateTimer.Start(); _ = CheckUpdatesAsync(false);
+        // A handoff has already installed its update; only a normal launch checks automatically.
+        if (updateSettings.Automatic && !updating) _ = CheckStartupUpdateAsync(InstallUpdateAsync);
     }
 
-    private async Task CheckUpdatesAsync(bool manual)
+    private async Task CheckStartupUpdateAsync(Func<Task> install)
+    {
+        busy = true; FrameContent.IsHitTestVisible = false;
+        try
+        {
+            // Let the first window layout finish before an update can collapse it.
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            var release = await CheckUpdatesAsync(false);
+            busy = false;
+            if (!exitRequested && updateSettings.Automatic && release != null && ReferenceEquals(availableUpdate, release)) await install();
+        }
+        finally
+        {
+            busy = false; FrameContent.IsHitTestVisible = true;
+            if (exitRequested) Close();
+        }
+        if (!exitRequested) await ReadWhenForeground();
+    }
+
+    private async Task<UpdateRelease?> CheckUpdatesAsync(bool manual)
     {
         // A developer simulation stays offered until it is used or the channel changes.
-        if (updateRequest is { IsCancellationRequested: false } || availableUpdate?.Simulated == true || updating) return;
+        if (updateRequest is { IsCancellationRequested: false } || availableUpdate?.Simulated == true || updating) return null;
         using var cancellation = new CancellationTokenSource(); updateRequest = cancellation;
         var channel = updateSettings.Channel; checkUpdatesButton.IsEnabled = false;
         if (manual) { updateCheckVersion = ""; SetUpdateCheckStatus("正在检查更新…"); }
@@ -168,12 +183,14 @@ public partial class MainWindow
             checkUpdateRelease ??= (selected, token) => (updateChecker ??= new UpdateChecker()).CheckAsync(selected, token);
             var latest = await checkUpdateRelease(channel, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
-            SetAvailableUpdate(latest is not null && latest.IsOfferedTo(InstalledVersion.Current, channel) ? latest : null);
+            var release = latest is not null && latest.IsOfferedTo(InstalledVersion.Current, channel) ? latest : null;
+            SetAvailableUpdate(release);
             if (manual)
             {
                 updateCheckVersion = latest == null ? "" : " v" + latest.Version.ToString(3) + (latest.Development ? "_" + latest.BuildCommit : "");
                 SetUpdateCheckStatus(availableUpdate != null ? "发现新版本" : latest == null ? "暂无可用版本" : "已是最新版本");
             }
+            return release;
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex)
@@ -185,6 +202,7 @@ public partial class MainWindow
         {
             if (ReferenceEquals(updateRequest, cancellation)) { updateRequest = null; checkUpdatesButton.IsEnabled = true; }
         }
+        return null;
     }
 
     private void SetAvailableUpdate(UpdateRelease? release)
@@ -207,7 +225,7 @@ public partial class MainWindow
     }
     private void StopUpdateChecks()
     {
-        updateTimer.Stop(); updateHoverTimer.Stop(); CloseUpdatePopup(); updatePopup.IsOpen = false;
+        updateHoverTimer.Stop(); CloseUpdatePopup(); updatePopup.IsOpen = false;
         updateRequest?.Cancel(); updateChecker?.Dispose();
     }
 }

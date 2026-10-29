@@ -75,7 +75,7 @@ public partial class MainWindow : Window
         UiLanguage.Current.Changed += RefreshLanguage;
         SourceInitialized += (_, _) =>
         {
-            shadow = new WindowShadow(this) { Suspended = updating };
+            shadow = new WindowShadow(this, updating);
             deviceWatcher = new DeviceChangeWatcher(HwndSource.FromHwnd(new WindowInteropHelper(this).Handle), change => HandleDeviceChange(change, RefreshUsbPresenceAsync));
             Dispatcher.BeginInvoke(UpdateWindowSizing);
         };

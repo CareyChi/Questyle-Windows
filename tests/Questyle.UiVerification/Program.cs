@@ -1476,9 +1476,10 @@ static class Program
             catch (OperationCanceledException) { Check(attempts == 1, "cancelling a check during TLS recovery prevents the second request"); }
         }
         var automatic = Field<CheckBox>(window, "automaticUpdates");
-        Check(automatic.IsChecked == true && UpdateSettings.Load().Channel == UpdateChannel.Stable && Field<DispatcherTimer>(window, "updateTimer").Interval == TimeSpan.FromMinutes(5), "update checks default to automatic stable checks at five-minute intervals");
+        Check(automatic.IsChecked == false && !UpdateSettings.Load().Automatic && UpdateSettings.Load().Channel == UpdateChannel.Stable, "automatic updates default off on the stable channel");
+        VerifyStartupUpdates(window, stable);
         automatic.IsChecked = false; automatic.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-        Check(!UpdateSettings.Load().Automatic && !Field<DispatcherTimer>(window, "updateTimer").IsEnabled, "automatic checks can be disabled and the choice is persisted");
+        Check(!UpdateSettings.Load().Automatic, "automatic updates can be disabled and the choice is persisted");
         Invoke(window, "SelectUpdateChannel", UpdateChannel.Development); SettleTransitions();
         Check(UpdateSettings.Load().Channel == UpdateChannel.Development && Field<TranslateTransform>(window, "updateChannelIndicator").X > 0, "the update channel selector slides and persists independently of automatic checking");
         var checkField = typeof(MainWindow).GetField("checkUpdateRelease", BindingFlags.NonPublic | BindingFlags.Instance)!;
@@ -1613,6 +1614,52 @@ static class Program
         Invoke(window, "SetAvailableUpdate", (object)null!); Invoke(window, "SetUpdateCheckStatus", (object)null!);
         checkField.SetValue(window, null);
         Render(window, "settings-updates", 1240, 800);
+    }
+
+    private static void VerifyStartupUpdates(MainWindow window, UpdateRelease release)
+    {
+        var automatic = Field<CheckBox>(window, "automaticUpdates");
+        var checkField = typeof(MainWindow).GetField("checkUpdateRelease", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var updating = typeof(MainWindow).GetField("updating", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        int checks = 0, installs = 0;
+        var pending = new TaskCompletionSource<UpdateRelease?>();
+        checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((_, _) => { checks++; return pending.Task; }));
+        window.StartUpdateChecks();
+        Check(checks == 0 && !Field<bool>(window, "busy"), "a normal launch with automatic updates off makes no request");
+        automatic.IsChecked = true; automatic.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Check(UpdateSettings.Load().Automatic && checks == 0, "enabling automatic updates persists without checking during use");
+        updating.SetValue(window, true); window.StartUpdateChecks(); updating.SetValue(window, false);
+        Check(checks == 0, "an update handoff does not check again or start another installation");
+        Func<Task> install = () =>
+        {
+            Check(!Field<bool>(window, "busy") && !Field<Grid>(window, "FrameContent").IsHitTestVisible, "startup installation starts after checking and before interaction resumes");
+            installs++; return Task.CompletedTask;
+        };
+        void Complete(Task task)
+        {
+            if (!task.IsCompleted)
+            {
+                var frame = new DispatcherFrame();
+                task.ContinueWith(_ => window.Dispatcher.BeginInvoke(() => frame.Continue = false));
+                Dispatcher.PushFrame(frame);
+            }
+            task.GetAwaiter().GetResult();
+        }
+        var startup = (Task)Invoke(window, "CheckStartupUpdateAsync", install)!;
+        Check(Field<bool>(window, "busy") && !Field<Grid>(window, "FrameContent").IsHitTestVisible, "startup checking reserves the operation before USB auto-read or interaction");
+        pending.SetResult(release); Complete(startup);
+        Check(checks == 1 && installs == 1 && !Field<bool>(window, "busy") && Field<Grid>(window, "FrameContent").IsHitTestVisible && !window.IsVisible, "startup finds and installs an update once, then restores interaction without showing a test window");
+        checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((_, _) => Task.FromResult<UpdateRelease?>(null)));
+        Complete((Task)Invoke(window, "CheckStartupUpdateAsync", install)!);
+        Check(installs == 1 && !Field<bool>(window, "busy"), "a startup without an available release resumes without installation");
+        checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((_, _) => Task.FromException<UpdateRelease?>(new HttpRequestException("simulated startup failure"))));
+        Complete((Task)Invoke(window, "CheckStartupUpdateAsync", install)!);
+        Check(installs == 1 && !Field<bool>(window, "busy") && Field<Grid>(window, "FrameContent").IsHitTestVisible, "a failed startup check releases interaction without installing a stale release");
+        checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((_, _) => Task.FromResult<UpdateRelease?>(release)));
+        Complete((Task)Invoke(window, "CheckUpdatesAsync", true)!);
+        Check(installs == 1 && Field<Border>(window, "newVersionBadge").Visibility == Visibility.Visible, "manual checking with automatic updates enabled offers a release without installing during use");
+        Invoke(window, "SetAvailableUpdate", (object)null!); Invoke(window, "SetUpdateCheckStatus", (object)null!);
+        typeof(MainWindow).GetField("updateChecksStarted", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, false);
     }
 
     private static void VerifyUpdateInstallation(MainWindow window, UpdateRelease stable)

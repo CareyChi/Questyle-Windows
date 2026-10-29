@@ -5,7 +5,7 @@ namespace Questyle.Desktop.Services;
 
 public enum UpdateChannel { Stable, Development }
 
-public sealed record UpdateSettings(bool Automatic = true, UpdateChannel Channel = UpdateChannel.Stable)
+public sealed record UpdateSettings(bool Automatic = false, UpdateChannel Channel = UpdateChannel.Stable)
 {
     private static string FilePath => Path.Combine(AppPaths.DataDirectory, "updates.json");
     public static UpdateSettings Load()

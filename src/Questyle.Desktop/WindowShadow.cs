@@ -21,9 +21,10 @@ internal sealed class WindowShadow
     private IntPtr shadowHandle;
     private bool suspended;
 
-    public WindowShadow(Window owner)
+    public WindowShadow(Window owner, bool suspended)
     {
         this.owner = owner;
+        this.suspended = suspended;
         ownerSource = HwndSource.FromHwnd(new WindowInteropHelper(owner).Handle);
         ownerSource.AddHook(MoveWithOwner);
         shadow = new Window

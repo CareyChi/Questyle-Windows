@@ -114,7 +114,7 @@ public partial class MainWindow
     {
         if (availableUpdate is not { } release || updating) return;
         if (busy) { SetStatus("正在执行上一项操作，请稍候。"); return; }
-        busy = updating = true; updateTimer.Stop(); updateRequest?.Cancel(); CloseUpdatePopup();
+        busy = updating = true; updateRequest?.Cancel(); CloseUpdatePopup();
         var cancellation = new CancellationTokenSource(); operationCancel = cancellation;
         UpdateInstallation? installation = null; Process? successor = null; bool collapsed = false;
         AddLog((release.Simulated ? "开始模拟更新：" : "开始更新：") + release.DisplayName);
@@ -170,7 +170,6 @@ public partial class MainWindow
             busy = updating = false;
             if (exitRequested) { Close(); return; }
             if (error is not OperationCanceledException) ShowError(error);
-            if (updateSettings.Automatic && updateChecksStarted) updateTimer.Start();
         }
         finally { successor?.Dispose(); cancellation.Dispose(); }
     }

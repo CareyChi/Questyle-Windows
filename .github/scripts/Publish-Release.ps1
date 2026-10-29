@@ -10,8 +10,9 @@ $projectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $asset = Join-Path $projectRoot 'dist/questyle-windows-x64.zip'
 $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
 $development = $Channel -eq 'development'
-# Development builds are identified by the first seven characters of their commit.
-$tag = if ($development) { "dev-build-$Commit" } else { "v$Version" }
+# A development tag targets the next patch so same-day builds sort above the base stable version.
+$baseVersion = [version]$Version
+$tag = if ($development) { "v$($baseVersion.Major).$($baseVersion.Minor).$($baseVersion.Build + 1)+$Commit" } else { "v$Version" }
 $title = if ($development) { "Dev build $Commit" } else { "Questyle Windows v$Version" }
 # Never attach new binaries to a tag that points at a different source revision.
 $existingTag = & git ls-remote --tags origin "refs/tags/$tag"
@@ -52,16 +53,16 @@ else { & gh release edit $tag --repo $repository --draft=false --latest }
 if ($LASTEXITCODE) { throw 'Publishing the release failed.' }
 
 if ($development) {
-    # Only after the new ZIP is verified and public, replace all previous prereleases.
-    # Stable releases and their tags are never removed.
+    # Only after the new ZIP is verified and public, replace previous prereleases.
+    # Keep stable releases and the migration entries needed by already-published 7/8-character clients.
     $pages = & gh api "repos/$repository/releases?per_page=100" --paginate --slurp | ConvertFrom-Json
     if ($LASTEXITCODE) { throw 'Listing older prereleases failed.' }
     foreach ($page in $pages) {
         foreach ($release in $page) {
-            if ($release.prerelease -and !$release.draft -and $release.tag_name -ne $tag) {
+            if ($release.prerelease -and !$release.draft -and $release.tag_name -ne $tag -and $release.body -notmatch '(?m)^Update-Bridge: true\r?$') {
                 $deleteArguments = @('release','delete',$release.tag_name,'--repo',$repository,'--yes')
-                # Covers both commit tags and the earlier numbered dev-build tags.
-                if ($release.tag_name -match '^dev-build-[0-9a-f]+$') { $deleteArguments += '--cleanup-tag' }
+                # Covers versioned development tags and the earlier commit/numbered tags.
+                if ($release.tag_name -match '^(?:v[0-9]+\.[0-9]+\.[0-9]+\+[0-9a-f]{7}|dev-build-[0-9a-f]+)$') { $deleteArguments += '--cleanup-tag' }
                 & gh @deleteArguments
                 if ($LASTEXITCODE) { throw ('Removing an older prerelease failed: ' + $release.tag_name) }
             }

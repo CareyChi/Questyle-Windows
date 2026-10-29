@@ -28,6 +28,7 @@ public partial class MainWindow
     private bool updateChecksStarted;
     private const double UpdateChannelSegmentWidth = 109;
     private string? updateCheckStatusKey;
+    private string updateCheckVersion = "";
     private Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>? checkUpdateRelease;
 
     private FrameworkElement BuildVersionFooter()
@@ -161,14 +162,18 @@ public partial class MainWindow
         if (updateRequest is { IsCancellationRequested: false } || availableUpdate?.Simulated == true || updating) return;
         using var cancellation = new CancellationTokenSource(); updateRequest = cancellation;
         var channel = updateSettings.Channel; checkUpdatesButton.IsEnabled = false;
-        if (manual) SetUpdateCheckStatus("正在检查更新…");
+        if (manual) { updateCheckVersion = ""; SetUpdateCheckStatus("正在检查更新…"); }
         try
         {
             checkUpdateRelease ??= (selected, token) => (updateChecker ??= new UpdateChecker()).CheckAsync(selected, token);
             var latest = await checkUpdateRelease(channel, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
             SetAvailableUpdate(latest is not null && latest.IsOfferedTo(InstalledVersion.Current, channel) ? latest : null);
-            if (manual) SetUpdateCheckStatus(availableUpdate != null ? "发现新版本" : latest == null ? "暂无可用版本" : "已是最新版本");
+            if (manual)
+            {
+                updateCheckVersion = latest == null ? "" : " v" + latest.Version.ToString(3) + (latest.Development ? "_" + latest.BuildCommit : "");
+                SetUpdateCheckStatus(availableUpdate != null ? "发现新版本" : latest == null ? "暂无可用版本" : "已是最新版本");
+            }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex)
@@ -195,7 +200,11 @@ public partial class MainWindow
         if (availableUpdate != null && !updating) StyleTransitions.SetDropDownOpen(updatePopup, true);
     }
     private void CloseUpdatePopup() => StyleTransitions.SetDropDownOpen(updatePopup, false);
-    private void SetUpdateCheckStatus(string? key) { updateCheckStatusKey = key; updateCheckStatus.Text = key == null ? "" : L(key); }
+    private void SetUpdateCheckStatus(string? key)
+    {
+        if (key == null) updateCheckVersion = "";
+        updateCheckStatusKey = key; updateCheckStatus.Text = key == null ? "" : L(key) + updateCheckVersion;
+    }
     private void StopUpdateChecks()
     {
         updateTimer.Stop(); updateHoverTimer.Stop(); CloseUpdatePopup(); updatePopup.IsOpen = false;

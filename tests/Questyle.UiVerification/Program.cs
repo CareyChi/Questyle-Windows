@@ -1404,8 +1404,10 @@ static class Program
         };
         var json = JsonSerializer.Serialize(new[]
         {
-            Release("dev-build-1a2b3c4", true, "2026-10-29T06:00:00Z", "App-Version: 0.2.0"),
             Release("v0.2.0", false, "2026-10-29T05:00:00Z"),
+            Release("v0.2.1+1a2b3c4", true, "2026-10-29T06:00:00Z", "App-Version: 0.2.0"),
+            Release("dev-build-0f0f0f0", true, "2026-10-29T04:00:00Z", "App-Version: 0.2.0"),
+            Release("v0.2.1+1a2b3c4d", true, "2026-10-29T10:00:00Z", "App-Version: 0.2.0"),
             Release("v9.0.0", false, "2026-10-29T07:00:00Z", draft: true),
             Release("dev-build-77", true, "2026-10-29T09:00:00Z", "App-Version: 0.2.0"),
             Release("unrecognized", true, "2026-10-29T08:00:00Z")
@@ -1414,6 +1416,14 @@ static class Program
         var stable = UpdateChecker.SelectRelease(catalog.RootElement, UpdateChannel.Stable)!;
         var development = UpdateChecker.SelectRelease(catalog.RootElement, UpdateChannel.Development)!;
         Check(stable.DisplayName == "New version: 0.2.0" && development.DisplayName == "Dev build 1a2b3c4", "release channels select stable or the newest published commit-identified development release and reject drafts, numbered and unknown tags");
+        Check(development.Version == new Version(0, 2, 0), "the development update uses App-Version rather than the next-patch sorting tag");
+        using (var legacyCatalog = JsonDocument.Parse(JsonSerializer.Serialize(new[] { Release("dev-build-0f0f0f0", true, "2026-10-29T04:00:00Z", "App-Version: 0.2.0") })))
+            Check(UpdateChecker.SelectRelease(legacyCatalog.RootElement, UpdateChannel.Development)?.BuildCommit == "0f0f0f0", "existing seven-character development tags remain readable during the tag transition");
+        using (var bridgeCatalog = JsonDocument.Parse(JsonSerializer.Serialize(new[] { Release("dev-build-1a2b3c4d", true, "2026-10-29T06:00:00Z", "App-Version: 0.2.0") })))
+        {
+            var bridge = UpdateChecker.SelectRelease(bridgeCatalog.RootElement, UpdateChannel.Development)!;
+            Check(bridge.BuildCommit == "1a2b3c4" && bridge.IsInstalled(new InstalledVersion(new Version(0, 2, 0), "1a2b3c4", bridge.PublishedAt)), "eight-character migration tags normalize to seven characters and do not reoffer an installed build");
+        }
         var olderDev = new InstalledVersion(new Version(0, 2, 0, 0), "0f0f0f0", DateTimeOffset.Parse("2026-10-29T04:00:00Z"));
         var sameDev = olderDev with { BuildCommit = "1a2b3c4", BuiltAt = DateTimeOffset.Parse("2026-10-29T06:00:00Z") };
         Check(development.IsNewerThan(olderDev) && !development.IsNewerThan(sameDev) && stable.IsNewerThan(olderDev) && !stable.IsNewerThan(sameDev), "version comparison handles dev build numbers and a stable release newer than the installed dev build without reporting older releases");
@@ -1447,6 +1457,7 @@ static class Program
         ((Task)Invoke(window, "CheckUpdatesAsync", true)!).GetAwaiter().GetResult();
         var badge = Field<Border>(window, "newVersionBadge");
         Check(badge.Visibility == Visibility.Visible && Field<TextBlock>(window, "updatePopupTitle").Text == "New version: 0.2.0" && !Field<Popup>(window, "updatePopup").IsOpen, "manual checking works with automatic checks off and shows a badge without opening a window");
+        Check(Field<TextBlock>(window, "updateCheckStatus").Text == UiLanguage.Current["发现新版本"] + " v0.2.0", "manual update results append the channel release version rather than the installed version");
         var footer = Field<Border>(window, "versionHoverArea"); footer.UpdateLayout();
         var versionRow = (StackPanel)footer.Child;
         Check(versionRow.HorizontalAlignment == HorizontalAlignment.Center && footer.HorizontalAlignment == HorizontalAlignment.Center && footer.Padding.Left > 0, "the version and New badge stay centered together inside a larger hover target");
@@ -1536,6 +1547,35 @@ static class Program
         Invoke(window, "SelectUpdateChannel", otherChannel); SettleTransitions();
         Check(badge.Visibility == Visibility.Visible && Field<TextBlock>(window, "updatePopupTitle").Text == crossChannel.DisplayName, "switching away from the installed build's channel immediately offers that channel's latest release even with an older version");
         checksStarted.SetValue(window, false);
+        Invoke(window, "SelectUpdateChannel", installedChannel);
+        var current = InstalledVersion.Current;
+        var latestForStatus = stable with { Version = new Version(current.Version.Major, current.Version.Minor, current.Version.Build), BuildCommit = current.BuildCommit };
+        checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((_, _) => Task.FromResult<UpdateRelease?>(latestForStatus)));
+        ((Task)Invoke(window, "CheckUpdatesAsync", true)!).GetAwaiter().GetResult();
+        Check(badge.Visibility == Visibility.Collapsed && Field<TextBlock>(window, "updateCheckStatus").Text == UiLanguage.Current["已是最新版本"] + " v" + current.Display, "up-to-date results include the fetched channel version");
+        latestForStatus = latestForStatus with { Version = new Version(0, 0, 1) };
+        ((Task)Invoke(window, "CheckUpdatesAsync", true)!).GetAwaiter().GetResult();
+        Check(Field<TextBlock>(window, "updateCheckStatus").Text == UiLanguage.Current["已是最新版本"] + " v0.0.1" + (current.BuildCommit.Length > 0 ? "_" + current.BuildCommit : ""), "a newer installed build still shows the older version actually returned by the selected channel");
+        Invoke(window, "SelectUpdateChannel", otherChannel);
+        Check(Field<TextBlock>(window, "updateCheckStatus").Text == "", "changing channels clears the previous check result and version");
+        latestForStatus = development;
+        ((Task)Invoke(window, "CheckUpdatesAsync", true)!).GetAwaiter().GetResult();
+        var checkResult = Field<TextBlock>(window, "updateCheckStatus");
+        Field<List<Button>>(window, "nav")[3].RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        foreach (var code in UiLanguage.Codes)
+        {
+            UiLanguage.Current.Select(code);
+            Render(window, "about-update-result-" + code, 1240, 800);
+            var resultRow = (FrameworkElement)checkResult.Parent;
+            var identityCard = (Border)((FrameworkElement)resultRow.Parent).Parent;
+            Check(checkResult.Text == UiLanguage.Current["发现新版本"] + " v0.2.0_1a2b3c4" && checkResult.ActualHeight < 30
+                && checkResult.TransformToAncestor(identityCard).TransformBounds(new Rect(checkResult.RenderSize)).Right <= identityCard.ActualWidth - identityCard.Padding.Right + .5,
+                "the localized check result preserves the fetched development version and fits beside the button in " + code);
+        }
+        UiLanguage.Current.Select("zh-CN");
+        checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((_, _) => Task.FromResult<UpdateRelease?>(null)));
+        ((Task)Invoke(window, "CheckUpdatesAsync", true)!).GetAwaiter().GetResult();
+        Check(checkResult.Text == UiLanguage.Current["暂无可用版本"], "an empty release catalog clears the prior version instead of displaying an installed or stale version");
         Invoke(window, "SelectUpdateChannel", UpdateChannel.Stable); SettleTransitions();
         var aboutButtons = (StackPanel)Field<Button>(window, "checkUpdatesButton").Parent;
         Check(aboutButtons.Children[^2] == Field<Button>(window, "checkUpdatesButton") && aboutButtons.Children[^1] == Field<TextBlock>(window, "updateCheckStatus")

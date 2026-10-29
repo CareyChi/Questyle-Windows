@@ -46,7 +46,7 @@ jobs:
           $version = [string]$project.Project.PropertyGroup.Version
           "version=$version" >> $env:GITHUB_OUTPUT
           "BuildTimestamp=$([DateTimeOffset]::UtcNow.ToString('O'))" >> $env:GITHUB_ENV
-          if ($env:RELEASE_CHANNEL -eq 'development') { "DevBuildCommit=$($env:GITHUB_SHA.Substring(0, 8))" >> $env:GITHUB_ENV }
+          if ($env:RELEASE_CHANNEL -eq 'development') { "DevBuildCommit=$($env:GITHUB_SHA.Substring(0, 7))" >> $env:GITHUB_ENV }
       - name: Build Release
         run: dotnet build Questyle.sln -c Release
       - name: Verify protocol without USB
@@ -88,4 +88,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_CHANNEL: ${{ inputs.channel || 'development' }}
           APP_VERSION: ${{ needs.build.outputs.version }}
-        run: ./.github/scripts/Publish-Release.ps1 -Channel $env:RELEASE_CHANNEL -Version $env:APP_VERSION -Commit $env:GITHUB_SHA.Substring(0, 8)
+        run: ./.github/scripts/Publish-Release.ps1 -Channel $env:RELEASE_CHANNEL -Version $env:APP_VERSION -Commit $env:GITHUB_SHA.Substring(0, 7)

@@ -4,13 +4,13 @@ param(
     [Parameter(Mandatory=$true)][string]$Commit
 )
 $ErrorActionPreference = 'Stop'
-if ($Version -notmatch '^\d+\.\d+\.\d+$' -or $Commit -cnotmatch '^[0-9a-f]{8}$') { throw 'Invalid release identity.' }
+if ($Version -notmatch '^\d+\.\d+\.\d+$' -or $Commit -cnotmatch '^[0-9a-f]{7}$') { throw 'Invalid release identity.' }
 $repository = $env:GITHUB_REPOSITORY
 $projectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $asset = Join-Path $projectRoot 'dist/questyle-windows-x64.zip'
 $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
 $development = $Channel -eq 'development'
-# Development builds are identified by the first eight characters of their commit.
+# Development builds are identified by the first seven characters of their commit.
 $tag = if ($development) { "dev-build-$Commit" } else { "v$Version" }
 $title = if ($development) { "Dev build $Commit" } else { "Questyle Windows v$Version" }
 # Never attach new binaries to a tag that points at a different source revision.

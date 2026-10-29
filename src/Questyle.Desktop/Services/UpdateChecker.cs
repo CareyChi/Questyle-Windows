@@ -24,7 +24,7 @@ public sealed record InstalledVersion(Version Version, string BuildCommit, DateT
 
     // CI writes the commit only into development builds.
     public UpdateChannel Channel => BuildCommit.Length > 0 ? UpdateChannel.Development : UpdateChannel.Stable;
-    // Development builds append their commit to the version they were built from, e.g. 0.1.0_4c0701e4.
+    // Development builds append their commit to the version they were built from, e.g. 0.1.0_4c0701e.
     public string Display => Version.ToString(3) + (BuildCommit.Length > 0 ? "_" + BuildCommit : "");
 }
 
@@ -87,8 +87,8 @@ public sealed class UpdateChecker : IDisposable
             if (development)
             {
                 if (channel == UpdateChannel.Stable) continue;
-                // Development tags carry the first eight characters of the built commit.
-                var match = Regex.Match(tag, @"^dev-build-([0-9a-f]{8})$");
+                // Development tags carry the first seven characters of the built commit.
+                var match = Regex.Match(tag, @"^dev-build-([0-9a-f]{7})$");
                 if (!match.Success) continue;
                 commit = match.Groups[1].Value;
                 // The CI writes the base application version into the release body.

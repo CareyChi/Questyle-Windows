@@ -91,7 +91,7 @@ public partial class MainWindow
         updateRequest?.Cancel();
         SetAvailableUpdate(updateSettings.Channel == UpdateChannel.Stable
             ? new UpdateRelease(new Version(version.Major, version.Minor, version.Build + 1), "", DateTimeOffset.Now)
-            : new UpdateRelease(new Version(version.Major, version.Minor, version.Build), Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant(), DateTimeOffset.Now));
+            : new UpdateRelease(new Version(version.Major, version.Minor, version.Build), Convert.ToHexString(RandomNumberGenerator.GetBytes(4))[..7].ToLowerInvariant(), DateTimeOffset.Now));
     }
 
     private static (string Number, string Unit) FormatSize(long bytes)

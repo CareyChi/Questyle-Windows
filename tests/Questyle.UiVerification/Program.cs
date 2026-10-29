@@ -1404,7 +1404,7 @@ static class Program
         };
         var json = JsonSerializer.Serialize(new[]
         {
-            Release("dev-build-1a2b3c4d", true, "2026-10-29T06:00:00Z", "App-Version: 0.2.0"),
+            Release("dev-build-1a2b3c4", true, "2026-10-29T06:00:00Z", "App-Version: 0.2.0"),
             Release("v0.2.0", false, "2026-10-29T05:00:00Z"),
             Release("v9.0.0", false, "2026-10-29T07:00:00Z", draft: true),
             Release("dev-build-77", true, "2026-10-29T09:00:00Z", "App-Version: 0.2.0"),
@@ -1413,15 +1413,15 @@ static class Program
         using var catalog = JsonDocument.Parse(json);
         var stable = UpdateChecker.SelectRelease(catalog.RootElement, UpdateChannel.Stable)!;
         var development = UpdateChecker.SelectRelease(catalog.RootElement, UpdateChannel.Development)!;
-        Check(stable.DisplayName == "New version: 0.2.0" && development.DisplayName == "Dev build 1a2b3c4d", "release channels select stable or the newest published commit-identified development release and reject drafts, numbered and unknown tags");
-        var olderDev = new InstalledVersion(new Version(0, 2, 0, 0), "0f0f0f0f", DateTimeOffset.Parse("2026-10-29T04:00:00Z"));
-        var sameDev = olderDev with { BuildCommit = "1a2b3c4d", BuiltAt = DateTimeOffset.Parse("2026-10-29T06:00:00Z") };
+        Check(stable.DisplayName == "New version: 0.2.0" && development.DisplayName == "Dev build 1a2b3c4", "release channels select stable or the newest published commit-identified development release and reject drafts, numbered and unknown tags");
+        var olderDev = new InstalledVersion(new Version(0, 2, 0, 0), "0f0f0f0", DateTimeOffset.Parse("2026-10-29T04:00:00Z"));
+        var sameDev = olderDev with { BuildCommit = "1a2b3c4", BuiltAt = DateTimeOffset.Parse("2026-10-29T06:00:00Z") };
         Check(development.IsNewerThan(olderDev) && !development.IsNewerThan(sameDev) && stable.IsNewerThan(olderDev) && !stable.IsNewerThan(sameDev), "version comparison handles dev build numbers and a stable release newer than the installed dev build without reporting older releases");
         var installedStable = new InstalledVersion(new Version(0, 2, 0, 0), "", DateTimeOffset.Parse("2026-10-29T05:30:00Z"));
-        Check(olderDev.Display == "0.2.0_0f0f0f0f" && installedStable.Display == "0.2.0", "development builds show their base version followed by the commit; stable builds show the version alone");
+        Check(olderDev.Display == "0.2.0_0f0f0f0" && installedStable.Display == "0.2.0", "development builds show their base version followed by the commit; stable builds show the version alone");
         var olderStable = stable with { Version = new Version(0, 1, 0) };
         Check(stable.IsOfferedTo(sameDev, UpdateChannel.Stable) && development.IsOfferedTo(installedStable, UpdateChannel.Development)
-            && (development with { Version = new Version(0, 1, 0), BuildCommit = "0c0c0c0c" }).IsOfferedTo(installedStable, UpdateChannel.Development),
+            && (development with { Version = new Version(0, 1, 0), BuildCommit = "0c0c0c0" }).IsOfferedTo(installedStable, UpdateChannel.Development),
             "after switching channels the selected channel's latest release is offered even when it is not newer");
         Check(!development.IsOfferedTo(sameDev, UpdateChannel.Development) && !stable.IsOfferedTo(installedStable, UpdateChannel.Development) && !olderStable.IsOfferedTo(installedStable, UpdateChannel.Stable),
             "the installed release is never offered again and older releases are not offered within the installed channel");
@@ -1430,7 +1430,7 @@ static class Program
             if (request.RequestUri!.Host != "api.github.com" || !request.Headers.UserAgent.Any()) throw new Exception("Update request is missing its API identity");
             return new(HttpStatusCode.OK) { Content = new StringContent(json) };
         })))
-            Check(checker.CheckAsync(UpdateChannel.Development, CancellationToken.None).GetAwaiter().GetResult()!.BuildCommit == "1a2b3c4d", "update HTTP client parses a simulated GitHub response without real network access");
+            Check(checker.CheckAsync(UpdateChannel.Development, CancellationToken.None).GetAwaiter().GetResult()!.BuildCommit == "1a2b3c4", "update HTTP client parses a simulated GitHub response without real network access");
         using (var checker = new UpdateChecker(new UpdateResponseHandler(_ => new(HttpStatusCode.Forbidden))))
         {
             try { checker.CheckAsync(UpdateChannel.Stable, CancellationToken.None).GetAwaiter().GetResult(); throw new Exception("Failed HTTP request accepted"); }
@@ -1468,7 +1468,7 @@ static class Program
                 if (x >= badgeStart && rowPixels[i + 3] == 255 && rowPixels[i + 1] > 200) { newTop = Math.Min(newTop, y); newBottom = Math.Max(newBottom, y); }
             }
         Check(Math.Abs((versionTop + versionBottom) - (newTop + newBottom)) / 12d <= .75, "the version text and New badge text share one visual center line");
-        versionText.Text = "v0.1.0_4c0701e4"; footer.UpdateLayout();
+        versionText.Text = "v0.1.0_4c0701e"; footer.UpdateLayout();
         Check(versionRow.ActualWidth >= versionRow.DesiredSize.Width && versionText.ActualHeight < 30 && footer.TranslatePoint(new Point(14 + versionRow.ActualWidth, 0), (UIElement)window.Content).X <= 210, "a development build version fits on one line beside the New badge inside the sidebar");
         versionText.Text = shownVersion; footer.UpdateLayout();
         var popupField = typeof(MainWindow).GetField("updatePopup", BindingFlags.NonPublic | BindingFlags.Instance)!;
@@ -1497,7 +1497,7 @@ static class Program
                 Check(originalPopup.Placement == PlacementMode.Custom && originalPopup.PlacementTarget == footer && Math.Abs(position.X + width / 2 - footer.ActualWidth / 2) < .001 && position.Y == -108 && Math.Abs(footer.TranslatePoint(new Point(footer.ActualWidth / 2, 0), footerGrid).X - footerGrid.ActualWidth / 2) < 1, "the popup stays above and centered on the sidebar for width " + width);
             }
             Invoke(window, "SetAvailableUpdate", development);
-            Check(hoverPopup.OpenRequested && Field<TextBlock>(window, "updatePopupTitle").Text == "Dev build 1a2b3c4d", "an open popup refreshes to the development build title without closing");
+            Check(hoverPopup.OpenRequested && Field<TextBlock>(window, "updatePopupTitle").Text == "Dev build 1a2b3c4", "an open popup refreshes to the development build title without closing");
             Invoke(window, "SetAvailableUpdate", stable);
             popupContent.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             RenderElement(popupContent, "version-hover-update", (int)Math.Ceiling(popupContent.DesiredSize.Width), (int)Math.Ceiling(popupContent.DesiredSize.Height));
@@ -1522,7 +1522,7 @@ static class Program
         // CI development builds carry a build number, so the installed channel depends on how this test was built.
         var installedChannel = InstalledVersion.Current.Channel;
         var otherChannel = installedChannel == UpdateChannel.Stable ? UpdateChannel.Development : UpdateChannel.Stable;
-        var crossChannel = otherChannel == UpdateChannel.Development ? development with { Version = new Version(0, 0, 1), BuildCommit = "0c0c0c0c" } : stable with { Version = new Version(0, 0, 1) };
+        var crossChannel = otherChannel == UpdateChannel.Development ? development with { Version = new Version(0, 0, 1), BuildCommit = "0c0c0c0" } : stable with { Version = new Version(0, 0, 1) };
         var checkedChannels = new List<UpdateChannel>();
         checkField.SetValue(window, (Func<UpdateChannel, CancellationToken, Task<UpdateRelease?>>)((channel, _) =>
         {

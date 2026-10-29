@@ -1,12 +1,12 @@
 # Questyle Windows 移植版
 
-从本机 `reverse/base.apk`（Questyle Android 1.8.0 / build 78）逆向重建的 Windows 原生客户端。目前是 **0.1.0 功能预览版**，不是全功能移植完成版。
+从本机 `reverse/base.apk`（Questyle Android 1.8.0 / build 78）逆向重建的 Windows 原生客户端。目前是 **0.1.1 功能预览版**，不是全功能移植完成版。
 
 当前源码聚焦 USB Dongle 控制。`dist` 是包含独立 PEQ 的本地 Windows x64 发布物，不纳入 Git；免插拔刷新实验未通过，未并入产品。根目录启动脚本已移除。
 
 ## 运行
 
-从 [GitHub Releases](https://github.com/CareyChi/Questyle-Windows/releases/tag/v0.1.0) 下载 `questyle-windows-x64.zip`，完整解压后运行 **Questyle.exe**；本机构建入口为 **dist/questyle-windows-x64/Questyle.exe**。发布版包含 .NET 运行时，不需要安装 Android 模拟器、Flutter 或 .NET SDK。压缩包请完整解压，运行库、DLL 与图片集中在 `runtime` 文件夹，简繁中文的框架资源及简体中文、繁体中文、英语翻译在 `language` 文件夹，不能单独移动根目录的启动程序。
+从 [GitHub Releases](https://github.com/CareyChi/Questyle-Windows/releases/tag/v0.1.1) 下载 `questyle-windows-x64.zip`，完整解压后运行 **Questyle.exe**；本机构建入口为 **dist/questyle-windows-x64/Questyle.exe**。发布版包含 .NET 运行时，不需要安装 Android 模拟器、Flutter 或 .NET SDK。压缩包请完整解压，运行库、DLL 与图片集中在 `runtime` 文件夹，简繁中文的框架资源及简体中文、繁体中文、英语翻译在 `language` 文件夹，不能单独移动根目录的启动程序。
 
 系统要求：Windows 10 2004（19041）或更新版本，x64。USB 控制需要系统已有的 **UsbDk** 驱动。历史实机验证使用了本机已有的 UsbDk，没有安装、替换或卸载设备驱动；PEQ 刷新实验请求过 Windows 设备重启，结果见 [验证记录](docs/VERIFICATION.md)。
 

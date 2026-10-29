@@ -852,8 +852,8 @@ static class Program
             Check(firstCharacterLeft >= nameInput.Padding.Left && firstCharacterLeft < nameInput.Padding.Left + 5, $"text input uses one padding plus the native text inset: {firstCharacterLeft}");
             VerifySettingsAlignment(window);
             VerifyUpdates(window);
-            var footerVersion = Descendants<TextBlock>((DependencyObject)window.Content).Single(text => text.Text == "Version: 0.1.0" && text.TextAlignment == TextAlignment.Center);
-            Check(footerVersion.TextAlignment == TextAlignment.Center && footerVersion.Margin.Left == footerVersion.Margin.Right, "sidebar version uses the Version label and symmetric horizontal alignment");
+            var footerVersion = Descendants<TextBlock>((DependencyObject)window.Content).Single(text => text.Text == "v" + InstalledVersion.Current.Display && text.TextAlignment == TextAlignment.Center);
+            Check(footerVersion.TextAlignment == TextAlignment.Center && footerVersion.Margin.Left == footerVersion.Margin.Right, "sidebar version uses the v prefix and symmetric horizontal alignment");
 
             Check(((SolidColorBrush)frameBorder.Background).Color == Color.FromRgb(24, 27, 36) && !frameBorder.SnapsToDevicePixels, "antialiased rounded edge has the sidebar colour underneath instead of a light corner fringe");
             Field<List<Button>>(window, "nav")[0].RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
@@ -1418,6 +1418,7 @@ static class Program
         var sameDev = olderDev with { BuildCommit = "1a2b3c4d", BuiltAt = DateTimeOffset.Parse("2026-10-29T06:00:00Z") };
         Check(development.IsNewerThan(olderDev) && !development.IsNewerThan(sameDev) && stable.IsNewerThan(olderDev) && !stable.IsNewerThan(sameDev), "version comparison handles dev build numbers and a stable release newer than the installed dev build without reporting older releases");
         var installedStable = new InstalledVersion(new Version(0, 2, 0, 0), "", DateTimeOffset.Parse("2026-10-29T05:30:00Z"));
+        Check(olderDev.Display == "0.2.0_0f0f0f0f" && installedStable.Display == "0.2.0", "development builds show their base version followed by the commit; stable builds show the version alone");
         var olderStable = stable with { Version = new Version(0, 1, 0) };
         Check(stable.IsOfferedTo(sameDev, UpdateChannel.Stable) && development.IsOfferedTo(installedStable, UpdateChannel.Development)
             && (development with { Version = new Version(0, 1, 0), BuildCommit = "0c0c0c0c" }).IsOfferedTo(installedStable, UpdateChannel.Development),
@@ -1449,6 +1450,9 @@ static class Program
         var footer = Field<Border>(window, "versionHoverArea"); footer.UpdateLayout();
         var versionRow = (StackPanel)footer.Child;
         Check(versionRow.HorizontalAlignment == HorizontalAlignment.Center && footer.HorizontalAlignment == HorizontalAlignment.Center && footer.Padding.Left > 0, "the version and New badge stay centered together inside a larger hover target");
+        // The underscore of a development build lies below the baseline, so ink is measured on the version alone.
+        var versionText = (TextBlock)versionRow.Children[0]; var shownVersion = versionText.Text;
+        versionText.Text = "v" + InstalledVersion.Current.Version.ToString(3); footer.UpdateLayout();
         var rowBitmap = new RenderTargetBitmap((int)Math.Ceiling(versionRow.ActualWidth * 6), (int)Math.Ceiling(versionRow.ActualHeight * 6), 576, 576, PixelFormats.Pbgra32);
         var rowVisual = new DrawingVisual();
         using (var context = rowVisual.RenderOpen()) context.DrawRectangle(new VisualBrush(versionRow), null, new Rect(0, 0, versionRow.ActualWidth, versionRow.ActualHeight));
@@ -1464,6 +1468,9 @@ static class Program
                 if (x >= badgeStart && rowPixels[i + 3] == 255 && rowPixels[i + 1] > 200) { newTop = Math.Min(newTop, y); newBottom = Math.Max(newBottom, y); }
             }
         Check(Math.Abs((versionTop + versionBottom) - (newTop + newBottom)) / 12d <= .75, "the version text and New badge text share one visual center line");
+        versionText.Text = "v0.1.0_4c0701e4"; footer.UpdateLayout();
+        Check(versionRow.ActualWidth >= versionRow.DesiredSize.Width && versionText.ActualHeight < 30 && footer.TranslatePoint(new Point(14 + versionRow.ActualWidth, 0), (UIElement)window.Content).X <= 210, "a development build version fits on one line beside the New badge inside the sidebar");
+        versionText.Text = shownVersion; footer.UpdateLayout();
         var popupField = typeof(MainWindow).GetField("updatePopup", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var originalPopup = Field<Popup>(window, "updatePopup");
         var popupContent = (FrameworkElement)originalPopup.Child;

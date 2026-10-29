@@ -33,7 +33,7 @@ public partial class MainWindow
     private FrameworkElement BuildVersionFooter()
     {
         // Natural line height: LineHeight leaves its extra space below the text, lifting it above the badge.
-        var edition = Note("Version: " + ApplicationVersion); edition.TextAlignment = TextAlignment.Center;
+        var edition = Note("v" + ApplicationVersion); edition.TextAlignment = TextAlignment.Center;
         edition.LineHeight = double.NaN; edition.VerticalAlignment = VerticalAlignment.Center;
         newVersionBadge.Background = accent; newVersionBadge.CornerRadius = new CornerRadius(4);
         newVersionBadge.Margin = new Thickness(6, 0, 0, 0); newVersionBadge.Padding = new Thickness(5, 1, 5, 1);

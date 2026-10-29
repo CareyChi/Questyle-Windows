@@ -24,6 +24,8 @@ public sealed record InstalledVersion(Version Version, string BuildCommit, DateT
 
     // CI writes the commit only into development builds.
     public UpdateChannel Channel => BuildCommit.Length > 0 ? UpdateChannel.Development : UpdateChannel.Stable;
+    // Development builds append their commit to the version they were built from, e.g. 0.1.0_4c0701e4.
+    public string Display => Version.ToString(3) + (BuildCommit.Length > 0 ? "_" + BuildCommit : "");
 }
 
 // Package is the GitHub asset API address; a null package marks the developer simulation.

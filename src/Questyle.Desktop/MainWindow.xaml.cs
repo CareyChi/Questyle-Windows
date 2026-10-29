@@ -455,7 +455,7 @@ public partial class MainWindow : Window
         return Scroll(Card("软件设置", [languageRow, startupRow, .. BuildUpdateSettings()]), names, BuildDeveloperCard());
     }
 
-    private static string ApplicationVersion => typeof(MainWindow).Assembly.GetName().Version!.ToString(3);
+    private static string ApplicationVersion => InstalledVersion.Current.Display;
     private FrameworkElement BuildAbout()
     {
         var version = Note("Version: " + ApplicationVersion); version.Margin = new Thickness(0, 0, 0, 22);

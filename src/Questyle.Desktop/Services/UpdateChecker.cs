@@ -17,7 +17,7 @@ public sealed record InstalledVersion(Version Version, string BuildCommit, DateT
             var assembly = typeof(InstalledVersion).Assembly;
             var metadata = assembly.GetCustomAttributes<AssemblyMetadataAttribute>().ToDictionary(value => value.Key, value => value.Value);
             return new(assembly.GetName().Version!,
-                metadata.TryGetValue("DevBuildCommit", out var commit) ? commit![..7] : "",
+                metadata.TryGetValue("DevBuildCommit", out var commit) ? commit! : "",
                 metadata.TryGetValue("BuildTimestamp", out var timestamp) ? DateTimeOffset.Parse(timestamp!, CultureInfo.InvariantCulture) : DateTimeOffset.MinValue);
         }
     }
@@ -87,10 +87,10 @@ public sealed class UpdateChecker : IDisposable
             if (development)
             {
                 if (channel == UpdateChannel.Stable) continue;
-                // Versioned tags target the next patch for GitHub sorting; older commit tags remain readable.
-                var match = Regex.Match(tag, @"^(?:v[0-9]+\.[0-9]+\.[0-9]+\+([0-9a-f]{7})|dev-build-([0-9a-f]{7,8}))$");
+                // Development tags target the next patch for GitHub sorting.
+                var match = Regex.Match(tag, @"^v[0-9]+\.[0-9]+\.[0-9]+\+([0-9a-f]{7})$");
                 if (!match.Success) continue;
-                commit = (match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value)[..7];
+                commit = match.Groups[1].Value;
                 // The actual application version comes from the body, not the sorting tag.
                 var baseVersion = Regex.Match(release.GetProperty("body").GetString() ?? "", @"(?m)^App-Version: ([0-9]+\.[0-9]+\.[0-9]+)\r?$");
                 if (!baseVersion.Success || !Version.TryParse(baseVersion.Groups[1].Value, out version)) continue;

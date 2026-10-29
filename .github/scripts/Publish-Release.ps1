@@ -54,15 +54,14 @@ if ($LASTEXITCODE) { throw 'Publishing the release failed.' }
 
 if ($development) {
     # Only after the new ZIP is verified and public, replace previous prereleases.
-    # Keep stable releases and the migration entries needed by already-published 7/8-character clients.
+    # Stable releases and their tags are never removed.
     $pages = & gh api "repos/$repository/releases?per_page=100" --paginate --slurp | ConvertFrom-Json
     if ($LASTEXITCODE) { throw 'Listing older prereleases failed.' }
     foreach ($page in $pages) {
         foreach ($release in $page) {
-            if ($release.prerelease -and !$release.draft -and $release.tag_name -ne $tag -and $release.body -notmatch '(?m)^Update-Bridge: true\r?$') {
+            if ($release.prerelease -and !$release.draft -and $release.tag_name -ne $tag) {
                 $deleteArguments = @('release','delete',$release.tag_name,'--repo',$repository,'--yes')
-                # Covers versioned development tags and the earlier commit/numbered tags.
-                if ($release.tag_name -match '^(?:v[0-9]+\.[0-9]+\.[0-9]+\+[0-9a-f]{7}|dev-build-[0-9a-f]+)$') { $deleteArguments += '--cleanup-tag' }
+                if ($release.tag_name -match '^v[0-9]+\.[0-9]+\.[0-9]+\+[0-9a-f]{7}$') { $deleteArguments += '--cleanup-tag' }
                 & gh @deleteArguments
                 if ($LASTEXITCODE) { throw ('Removing an older prerelease failed: ' + $release.tag_name) }
             }

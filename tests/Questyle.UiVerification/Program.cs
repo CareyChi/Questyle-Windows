@@ -1575,15 +1575,18 @@ static class Program
             try { UpdateInstaller.Install(root, app); throw new Exception("Locked installation accepted"); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Check(AllRead("previous") && applicationFiles.All(file => File.Exists(Path.Combine(root, file))), "an entry that cannot be replaced restores the entries already replaced"); }
         }
-        var installation = UpdateInstaller.Install(root, app);
-        Check(AllRead("new") && File.ReadAllText(Path.Combine(app, "data", "settings.json")) == "user" && File.ReadAllText(Path.Combine(app, "paired-headphones.json")) == "user" && File.Exists(Path.Combine(app, "eq-config", "headphone.json")), "installation replaces application entries and keeps user data in place");
+        // The running process holds its loaded assemblies open like this, so the folder itself cannot be renamed.
+        UpdateInstallation installation;
+        using (File.Open(Path.Combine(app, "runtime", "Questyle.dll"), FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+            installation = UpdateInstaller.Install(root, app);
+        Check(AllRead("new") && File.ReadAllText(Path.Combine(app, "data", "settings.json")) == "user" && File.ReadAllText(Path.Combine(app, "paired-headphones.json")) == "user" && File.Exists(Path.Combine(app, "eq-config", "headphone.json")), "installation replaces files held open by the running process and keeps user data in place");
         installation.Rollback();
         Check(AllRead("previous"), "a failed handoff restores the previous application files");
         UpdateInstaller.DeleteWorkspace(); Directory.Delete(app, true);
         Render(window, "update-assets-loaded", 1240, 800);
         var heldAssets = Directory.EnumerateFiles(Path.Combine(AppContext.BaseDirectory, "assets"), "*", SearchOption.AllDirectories).Where(file =>
         {
-            // DELETE access fails while another handle lacks FILE_SHARE_DELETE, which would also block moving the folder.
+            // DELETE access fails while another handle lacks FILE_SHARE_DELETE, which would also block moving the file.
             var handle = CreateFileW(file, 0x00010000, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
             if (handle == new IntPtr(-1)) return true;
             CloseHandle(handle); return false;

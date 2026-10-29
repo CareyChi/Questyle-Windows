@@ -14,16 +14,12 @@ public sealed record UpdateHandoff(int ProcessId, string ReadyEvent, int CardLef
         ?? throw new InvalidDataException("更新交接信息无效");
 }
 
-public sealed class UpdateInstallation(IReadOnlyList<(string Target, string Staged, string? Previous)> moves)
+public sealed class UpdateInstallation(IReadOnlyList<(string Source, string Destination)> moves)
 {
-    // Moves the new entries back to staging and restores the previous ones.
+    // Undoes the file moves in reverse order: new files return to staging, previous files return in place.
     public void Rollback()
     {
-        foreach (var (target, staged, previous) in moves.Reverse())
-        {
-            if (UpdateInstaller.Exists(target)) UpdateInstaller.Move(target, staged);
-            if (previous != null) UpdateInstaller.Move(previous, target);
-        }
+        foreach (var (source, destination) in moves.Reverse()) File.Move(destination, source);
     }
 }
 
@@ -70,33 +66,27 @@ public static class UpdateInstaller
         return root;
     }
 
-    // Running images can be renamed on NTFS, so each top-level entry is moved aside
-    // and replaced while the old process keeps running from the mapped files.
+    // The runtime keeps its loaded assemblies open with FILE_SHARE_DELETE. Such files can be
+    // renamed, but a folder containing them cannot, so files are moved one by one: every previous
+    // application file goes aside first, then every new file takes its place.
     public static UpdateInstallation Install(string packageRoot, string applicationDirectory)
     {
-        var moves = new List<(string Target, string Staged, string? Previous)>();
+        var moves = new List<(string Source, string Destination)>();
         var installation = new UpdateInstallation(moves);
-        Directory.CreateDirectory(PreviousDirectory);
+        void Move(string source, string destination)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Move(source, destination);
+            moves.Add((source, destination));
+        }
         try
         {
-            foreach (var staged in Directory.EnumerateFileSystemEntries(packageRoot).ToArray())
-            {
-                var name = Path.GetFileName(staged);
-                if (Preserved.Contains(name)) continue;
-                var target = Path.Combine(applicationDirectory, name);
-                string? previous = null;
-                if (Exists(target)) { previous = Path.Combine(PreviousDirectory, name); Move(target, previous); }
-                moves.Add((target, staged, previous));
-                Move(staged, target);
-            }
+            foreach (var file in ApplicationFiles(applicationDirectory).ToArray())
+                Move(file, Path.Combine(PreviousDirectory, Path.GetRelativePath(applicationDirectory, file)));
+            foreach (var file in ApplicationFiles(packageRoot).ToArray())
+                Move(file, Path.Combine(applicationDirectory, Path.GetRelativePath(packageRoot, file)));
         }
         catch { installation.Rollback(); throw; }
         return installation;
-    }
-
-    internal static bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
-    internal static void Move(string source, string destination)
-    {
-        if (Directory.Exists(source)) Directory.Move(source, destination); else File.Move(source, destination);
     }
 }

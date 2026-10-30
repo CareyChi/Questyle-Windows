@@ -1,10 +1,10 @@
 # Questyle Windows 开发文档
 
-本文以 2026-10-29 当前源码为基准，记录现有功能、代码职责、运行流程和开发方式。协作约束见根目录 [AGENTS.md](../AGENTS.md)，界面细节见 [UI 样式规范](UI-STYLE.md)。
+本文以 2026-10-30 当前源码为基准，记录现有功能、代码职责、运行流程和开发方式。协作约束见根目录 [AGENTS.md](../AGENTS.md)，界面细节见 [UI 样式规范](UI-STYLE.md)。
 
 ## 1. 当前范围
 
-本项目从 Questyle Android `1.8.0 / build 78` APK 逆向重建 Windows USB Dongle 客户端，当前版本号为 `0.1.2`。原始 APK 在本机 reverse/base.apk。现有界面按「设备」「PEQ」「设置」「关于」排列，设备改名位于设置页。
+本项目从 Questyle Android `1.8.0 / build 78` APK 逆向重建 Windows USB Dongle 客户端，当前版本号为 `0.1.3`。原始 APK 在本机 reverse/base.apk。现有界面按「设备」「PEQ」「设置」「关于」排列，设备改名位于设置页。
 
 Wi-Fi 播放器、本地音乐及底部播放栏已从源码移除，对应服务、依赖和测试也已清理，不属于当前功能。根目录启动脚本已删除；`dist` 已更新为包含独立 PEQ 的本地发布包，不纳入 Git。
 

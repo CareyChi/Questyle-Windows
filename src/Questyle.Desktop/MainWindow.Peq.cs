@@ -694,16 +694,14 @@ public partial class MainWindow
         peqInstall.IsEnabled = peqEndpoint != null; UpdatePeqControls();
         Localize(peqInstall, ContentControl.ContentProperty, peqEndpoint is { Installed: true } ? "卸载音频驱动" : "安装音频驱动");
         if (peqEndpoint == null) { SetPeqEndpointStatus(L("未找到 Dongle 播放端点")); return; }
-        if (!peqEndpoint.Installed) { SetPeqEndpointStatus(PeqEndpointText(peqEndpoint, "尚未安装音频驱动")); return; }
+        if (!peqEndpoint.Installed) { SetPeqEndpointStatus(L("尚未安装音频驱动")); return; }
         var status = peqEndpoint.ReadStatus();
         if (status.Error < 0) { System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(status.Error); }
         if (status.Processing && peqPreviewRate != status.Rate) { peqPreviewRate = status.Rate; DrawPeq(); }
-        SetPeqEndpointStatus(PeqEndpointText(peqEndpoint, status.Processing ? "音频驱动正在处理音频" : "音频驱动已安装，等待音频流"));
+        SetPeqEndpointStatus(L(status.Processing ? "音频驱动正在处理音频" : "音频驱动已安装，等待音频流"));
         if (peqProfileLoaded && previousEndpoint != peqEndpoint) WriteLivePeq(GetPeq());
         else if (status.Processing && peqLiveRevision == status.Revision) { SetPeqState(L("PEQ 配置已加载")); peqLiveRevision = null; }
     }
-    private static string PeqEndpointText(PeqEndpoint endpoint, string state)
-        => (UiLanguage.Current.Code == "en-US" ? "" : endpoint.Name + " · ") + L(state);
     private void SetPeqEndpointStatus(string text)
     {
         if (text != peqEndpointStatus) SetPeqState(text);
